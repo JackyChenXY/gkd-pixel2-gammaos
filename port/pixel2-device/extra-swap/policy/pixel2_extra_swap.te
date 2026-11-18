@@ -1,0 +1,37 @@
+type pixel2_extra_swap, domain, coredomain;
+type pixel2_extra_swap_exec, exec_type, file_type, system_file_type;
+init_daemon_domain(pixel2_extra_swap)
+
+system_internal_prop(pixel2_extra_swap_enabled_prop)
+system_internal_prop(pixel2_extra_swap_status_prop)
+system_internal_prop(pixel2_extra_swap_supported_prop)
+
+set_prop(system_app, pixel2_extra_swap_enabled_prop)
+get_prop(system_app, pixel2_extra_swap_status_prop)
+get_prop(system_app, pixel2_extra_swap_supported_prop)
+set_prop(pixel2_extra_swap, pixel2_extra_swap_status_prop)
+
+type pixel2_extra_swap_data_file, file_type, data_file_type, core_data_file_type;
+allow init pixel2_extra_swap_data_file:dir create_dir_perms;
+allow pixel2_extra_swap system_data_root_file:dir { getattr search };
+allow pixel2_extra_swap pixel2_extra_swap_data_file:dir rw_dir_perms;
+allow pixel2_extra_swap pixel2_extra_swap_data_file:file create_file_perms;
+allowxperm pixel2_extra_swap pixel2_extra_swap_data_file:{ dir file } ioctl FS_IOC_GET_ENCRYPTION_POLICY;
+allowxperm pixel2_extra_swap pixel2_extra_swap_data_file:file ioctl {
+    F2FS_IOC_SET_PIN_FILE
+    F2FS_IOC_GET_PIN_FILE
+};
+
+allow pixel2_extra_swap self:global_capability_class_set sys_admin;
+allow pixel2_extra_swap proc_swaps:file r_file_perms;
+r_dir_file(pixel2_extra_swap, sysfs)
+r_dir_file(pixel2_extra_swap, sysfs_dm)
+allow pixel2_extra_swap block_device:dir search;
+allow pixel2_extra_swap block_device:lnk_file r_file_perms;
+allow pixel2_extra_swap userdata_block_device:lnk_file r_file_perms;
+allow pixel2_extra_swap userdata_block_device:blk_file getattr;
+allow pixel2_extra_swap toolbox_exec:file rx_file_perms;
+
+userdebug_or_eng(`
+    allow pixel2_extra_swap kmsg_debug_device:chr_file { getattr write };
+')

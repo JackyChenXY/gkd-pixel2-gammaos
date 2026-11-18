@@ -1,0 +1,48 @@
+diff --git a/drivers/gpu/drm/rockchip/rockchip_drm_vop.c b/drivers/gpu/drm/rockchip/rockchip_drm_vop.c
+--- a/drivers/gpu/drm/rockchip/rockchip_drm_vop.c
++++ b/drivers/gpu/drm/rockchip/rockchip_drm_vop.c
+@@ -51,6 +51,10 @@
+ #include "rockchip_drm_vop.h"
+ #include "rockchip_rgb.h"
+ 
++static bool pixel2_primary_only;
++module_param(pixel2_primary_only, bool, 0400);
++MODULE_PARM_DESC(pixel2_primary_only, "Restrict Pixel 2 display tests to the primary plane");
++
+ #define VOP_REG_SUPPORT(vop, reg) \
+ 		(reg.mask && \
+ 		 (!reg.major || \
+@@ -4635,9 +4639,15 @@ static int vop_create_crtc(struct vop *vop)
+ 	struct drm_plane *primary = NULL, *cursor = NULL, *plane, *tmp;
+ 	struct drm_crtc *crtc = &vop->rockchip_crtc.crtc;
+ 	struct device_node *port;
++	bool primary_only = pixel2_primary_only && vop->soc_id == 0x3326 &&
++			    vop->id == 0 &&
++			    of_machine_is_compatible("GameKiddy,gkd-pixel2");
+ 	int ret = 0;
+ 	int i;
+ 
++	if (primary_only)
++		dev_info(dev, "Pixel 2 display test: primary plane only\n");
++
+ 	/*
+ 	 * Create drm_plane for primary and cursor planes first, since we need
+ 	 * to pass them to drm_crtc_init_with_planes, which sets the
+@@ -4659,7 +4669,7 @@ static int vop_create_crtc(struct vop *vop)
+ 		plane = &win->base;
+ 		if (plane->type == DRM_PLANE_TYPE_PRIMARY)
+ 			primary = plane;
+-		else if (plane->type == DRM_PLANE_TYPE_CURSOR)
++		else if (plane->type == DRM_PLANE_TYPE_CURSOR && !primary_only)
+ 			cursor = plane;
+ 	}
+ 
+@@ -4676,7 +4686,7 @@ static int vop_create_crtc(struct vop *vop)
+ 	 */
+ 	for (i = 0; i < vop->num_wins; i++) {
+ 		struct vop_win *win = &vop->win[i];
+-		unsigned long possible_crtcs = drm_crtc_mask(crtc);
++		unsigned long possible_crtcs = primary_only ? 0 : drm_crtc_mask(crtc);
+ 
+ 		if (win->type != DRM_PLANE_TYPE_OVERLAY)
+ 			continue;

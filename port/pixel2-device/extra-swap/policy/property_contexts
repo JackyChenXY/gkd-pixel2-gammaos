@@ -1,0 +1,3 @@
+persist.sys.pixel2.extra_swap       u:object_r:pixel2_extra_swap_enabled_prop:s0    exact bool
+sys.pixel2.extra_swap.status        u:object_r:pixel2_extra_swap_status_prop:s0     exact enum active disabled insufficient_space failed
+ro.pixel2.extra_swap.supported      u:object_r:pixel2_extra_swap_supported_prop:s0  exact bool

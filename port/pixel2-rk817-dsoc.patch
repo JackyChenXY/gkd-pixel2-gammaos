@@ -1,0 +1,55 @@
+--- a/drivers/power/supply/rk817_battery.c
++++ b/drivers/power/supply/rk817_battery.c
+@@ -25,6 +25,7 @@
+ #include <linux/iio/iio.h>
+ #include <linux/irq.h>
+ #include <linux/jiffies.h>
++#include <linux/math64.h>
+ #include <linux/mfd/rk808.h>
+ #include <linux/module.h>
+ #include <linux/of_device.h>
+@@ -1615,6 +1616,35 @@
+ 	    __func__, battery->rsoc, battery->dsoc, battery->fcc, battery->nac);
+ }
+ 
++/* Reconcile the Pixel 2's stale near-empty display value at boot. */
++static int rk817_bat_recover_pixel2_dsoc(struct rk817_battery_device *battery,
++					int dsoc, int saved_cap, int counter_cap)
++{
++	int fcc = battery->fcc;
++	int voltage, counter_soc;
++
++	if (!of_machine_is_compatible("GameKiddy,gkd-pixel2") ||
++	    dsoc < 0 || dsoc > 1000 || fcc < MIN_FCC)
++		return dsoc;
++	if (saved_cap < fcc / 2 || saved_cap > fcc ||
++	    counter_cap < fcc / 2 || counter_cap > fcc ||
++	    abs(saved_cap - counter_cap) > fcc / 10)
++		return dsoc;
++
++	voltage = rk817_bat_get_battery_voltage(battery);
++	if (voltage < SLP_DSOC_VOL_THRESD ||
++	    rk817_bat_vol_to_soc(battery, voltage) < MAX_PERCENTAGE / 2)
++		return dsoc;
++
++	counter_soc = div_s64((s64)counter_cap * 1000 * MAX_PERCENTAGE, fcc);
++	if (counter_soc - dsoc < battery->pdata->max_soc_offset * 1000)
++		return dsoc;
++
++	BAT_INFO("Pixel 2: recovered cached display SOC %d -> %d\n",
++		 dsoc, counter_soc);
++	return counter_soc;
++}
++
+ static void rk817_bat_not_first_pwron(struct rk817_battery_device *battery)
+ {
+ 	int now_cap, pre_soc, pre_cap, ocv_cap, ocv_soc, ocv_vol;
+@@ -1641,6 +1671,8 @@
+ 	} else if (battery->is_initialized) {
+ 		/* uboot initialized */
+ 		BAT_INFO("initialized yet..\n");
++		pre_soc = rk817_bat_recover_pixel2_dsoc(battery, pre_soc,
++						      pre_cap, now_cap);
+ 		goto finish;
+ 	} else if (battery->is_ocv_calib) {
+ 		/* not initialized and poweroff_cnt above 30 min */

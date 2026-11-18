@@ -1,0 +1,78 @@
+# GKD Pixel 2 diagnostic, wrapped in the stock vendor SCRIPT format.
+# Android 12 with the corrected network kernel, stock display DTB and persistent logging.
+setenv setbootargs 'loop 0x06000000 1'
+setenv bootcmd 'loop 0x06000000 1'
+setenv p2_record 'mw.l 0x06000004 ${p2_step} 1; if fatwrite mmc 1:1 0x06000000 P2GDK.BIN 40; then true; else echo P2NRUN write failed; fi'
+setenv p2_stop 'mw.l 0x06000008 1 1; run p2_record; loop 0x06000000 1'
+
+# P2GDK.BIN stores a tag, step, failure flag, CRCs, and prepared addresses.
+mw.b 0x06000000 0 40
+mw.l 0x06000000 47443250 1
+setenv p2_step 10
+run p2_record
+if load mmc 1:1 0x02000000 P2BFX.IMG; then setenv p2_kernel_bytes ${filesize}; else run p2_stop; fi
+
+setenv p2_step 11
+run p2_record
+if load mmc 1:1 0x09000000 P2GDK.UIM; then setenv p2_rd_bytes ${filesize}; else run p2_stop; fi
+
+setenv p2_step 12
+run p2_record
+if load mmc 1:1 0x01f00000 P2PAD.DTB; then setenv p2_fdt_bytes ${filesize}; else run p2_stop; fi
+
+setenv p2_step 13
+run p2_record
+if crc32 0x02000000 ${p2_kernel_bytes} 0x06000010; then true; else echo Kernel CRC unavailable; fi
+if crc32 0x09000000 ${p2_rd_bytes} 0x06000018; then true; else echo Ramdisk CRC unavailable; fi
+if crc32 0x01f00000 ${p2_fdt_bytes} 0x06000020; then true; else echo DTB CRC unavailable; fi
+
+setenv p2_step 14
+if setenv p2_args 'console=ttyFIQ0 firmware_class.path=/vendor/etc/firmware init=/init rootwait ro loop.max_part=7 androidboot.console=ttyFIQ0 androidboot.wificountrycode=CN androidboot.hardware=rk30board androidboot.boot_devices=ff370000.dwmmc androidboot.selinux=permissive buildvariant=userdebug console=tty0 consoleblank=0 fbcon=rotate:3 rdinit=/p2-init rockchipdrm.pixel2_primary_only=1 lsm=lockdown,yama,loadpin,safesetid,integrity,selinux,bpf'; then true; else run p2_stop; fi
+if setenv bootargs "${p2_args}"; then true; else run p2_stop; fi
+# The actual firmware masks RAMDISK/PREP/FAKE_GO/GO with 0x710 here.
+# booti still validates and positions the kernel, ramdisk and DTB first.
+setenv p2_step 20
+run p2_record
+setenv bootm_states_unmask 710
+if booti 0x02000000 0x09000000 0x01f00000; then true; else run p2_stop; fi
+setenv bootm_states_unmask 0
+
+# Supplying the kernel address avoids the vendor's single-argument Android
+# image probe. These substates use the images already selected by booti.
+setenv p2_step 30
+run p2_record
+if bootm ramdisk 0x02000000; then true; else run p2_stop; fi
+
+setenv p2_step 40
+if test -n "${initrd_start}"; then mw.l 0x06000028 ${initrd_start} 1; fi
+if test -n "${initrd_end}"; then mw.l 0x0600002c ${initrd_end} 1; fi
+run p2_record
+if bootm prep 0x02000000; then true; else run p2_stop; fi
+
+# Snapshot only the finished device tree. Copy via libfdt into cleared RAM,
+# then restore the working pointer. Keep the normal relocation and boot path.
+setenv p2_step 50
+setenv p2_final_fdt ${fdtaddr}
+if test -n "${p2_final_fdt}"; then mw.l 0x06000030 ${p2_final_fdt} 1; fi
+run p2_record
+if test -n "${p2_final_fdt}"; then
+    mw.b 0x07000000 0 40000
+    if fdt move ${p2_final_fdt} 0x07000000 40000; then
+        if fatwrite mmc 1:1 0x07000000 P2GDKFDT.DTB 40000; then true; else echo P2FINAL could not be saved; fi
+        if fdt addr ${p2_final_fdt}; then true; else echo Unable to restore working tree pointer; fi
+    fi
+fi
+
+# Verify the exact command line in the final tree before letting the kernel run.
+setenv p2_step 55
+run p2_record
+if fdt addr "${p2_final_fdt}"; then true; else run p2_stop; fi
+if fdt get value p2_actual_args /chosen bootargs; then true; else run p2_stop; fi
+if test "${p2_actual_args}" = "${p2_args}"; then true; else run p2_stop; fi
+
+setenv p2_step 60
+run p2_record
+bootm go 0x02000000
+
+setenv p2_step 70
+run p2_stop

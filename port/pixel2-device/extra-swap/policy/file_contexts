@@ -1,0 +1,2 @@
+/system/bin/pixel2-extra-swap    u:object_r:pixel2_extra_swap_exec:s0
+/data/pixel2-swap(/.*)?          u:object_r:pixel2_extra_swap_data_file:s0

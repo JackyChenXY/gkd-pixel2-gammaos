@@ -1,0 +1,5 @@
+on post-fs && property:ro.product.vendor.device=gkd_pixel2
+    swapon_all /system/etc/fstab.pixel2.zram
+
+on property:persist.sys.zram_enabled=1 && property:ro.product.vendor.device=gkd_pixel2
+    setprop persist.sys.zram_enabled 0
