@@ -4,6 +4,8 @@
 
 写入会清空目标 TF 卡。准备一张空白备用卡，并记下容量，保留原装卡用于恢复。本地组装脚本只输出普通文件。最后一步由你在写盘工具中选择并确认备用卡。
 
+已有匹配的完整 `pixel2-gammaos.img` 时，直接按 [Windows 图形化刷卡指南](install-windows.md)写卡。
+
 ## 1. 准备输入
 
 在 Linux 或 Ubuntu 22.04 WSL 的仓库根目录执行。需要 `python3`、`dosfstools`、`mtools`、`e2fsprogs`、`u-boot-tools` 和 `device-tree-compiler`。在有足够空间的 Linux 文件系统里组装镜像。

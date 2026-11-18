@@ -12,6 +12,7 @@ GKD Pixel 2（RK3326S / PX30S）的非官方 GammaOS 移植。系统基于 Gamma
 ## 构建和安装
 
 - [Release 下载](https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases)提供公开内核、对应源码、启动脚本和 SHA-256。
+- [Windows 图形化刷卡](docs/install-windows.md)适合已经拿到匹配完整镜像的用户，无需安装 Linux 或 WSL。
 - [准备文件、组装镜像和写卡](docs/install.md)列出所有输入，并说明如何从自己的原装卡导出匹配的启动文件。
 - [GammaOS 构建](docs/build.md)与 [Rockchip 板级构建](docs/rockchip-sdk.md)提供对应源码、固定版本和编译步骤。
 - [实机与虚拟机验证](docs/validation.md)记录已测功能和已知限制。
