@@ -3,7 +3,7 @@ set -euo pipefail
 
 android_root=${ANDROID_ROOT:?Set ANDROID_ROOT to your Rockchip Android SDK checkout}
 project=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-build="$android_root/work/build/pixel2-kernel-5.10-bsp"
+build=${PIXEL2_KERNEL_BUILD:-"$android_root/work/build/pixel2-kernel-5.10-bsp"}
 source="$build/source"
 out="$build/out"
 android_base="$build/android12-5.10-base.config"

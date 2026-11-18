@@ -9,10 +9,10 @@ GKD Pixel 2（RK3326S / PX30S）的非官方 GammaOS 移植。系统基于 Gamma
 - 修正 RK817 电池百分比显示。
 - 在「设置 → 系统 → 虚拟内存」可选择额外启用 **2 GiB** TF 卡交换空间。开关默认关闭，重启生效。系统原有的 ZRAM 单独运行。交换空间会占用卡内存储，可用内存和模拟器表现仍取决于具体负载。
 
-## 从源码开始
+## 构建和安装
 
-- [构建和离线打包](docs/build.md)列出上游版本、工具链、板级输入及启动链。
-- [实机与虚拟机验证](docs/validation.md)记录已测功能、复核命令和已知限制。
-- [上游项目与许可证](THIRD_PARTY_NOTICES.md)列出移植依赖和各部分的许可证来源。
-
-本仓库提供移植源码、补丁、构建脚本和验证记录。完整刷卡需要自行准备匹配的 Pixel 2 启动固件、设备树和 Android 板级分区。
+- [Release 下载](https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases)提供公开内核、对应源码、启动脚本和 SHA-256。
+- [准备文件、组装镜像和写卡](docs/install.md)列出所有输入，并说明如何从自己的原装卡导出匹配的启动文件。
+- [GammaOS 构建](docs/build.md)与 [Rockchip 板级构建](docs/rockchip-sdk.md)提供对应源码、固定版本和编译步骤。
+- [实机与虚拟机验证](docs/validation.md)记录已测功能和已知限制。
+- [上游项目与许可证](THIRD_PARTY_NOTICES.md)列出移植依赖和许可来源。
