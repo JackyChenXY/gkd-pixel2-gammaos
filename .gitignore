@@ -1,0 +1,33 @@
+# Build outputs and device captures
+build-output/
+out/
+out-*/
+local/
+*.log
+*.img
+*.img.*
+*.iso
+*.apk
+*.bin
+*.dtb
+*.uimg
+*.vhdx
+*.raw
+*.trace
+*.zip
+*.7z
+*.tar.*
+boot.ini
+partition-layout.json
+__pycache__/
+*.pyc
+
+# Local credentials
+.env
+.env.*
+*.jks
+*.keystore
+*.kwd
+*.key
+*.pem
+adbkey*

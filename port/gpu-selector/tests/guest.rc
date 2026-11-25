@@ -1,0 +1,11 @@
+service p2-gpu-qualification /mnt/p2gpu/client
+    disabled
+    oneshot
+    user root
+    group root
+    seclabel u:r:shell:s0
+
+on post-fs-data
+    mkdir /mnt/p2gpu 0755 root root
+    mount ext4 /dev/block/by-name/recovery /mnt/p2gpu ro
+    start p2-gpu-qualification

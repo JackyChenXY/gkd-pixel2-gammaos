@@ -1,0 +1,238 @@
+--- /dev/null
++++ b/packages/apps/Trebuchet/quickstep/res/values/pixel2_recents_memory.xml
+@@ -0,0 +1,6 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="pixel2_recents_ram_available">RAM available %1$s</string>
++    <string name="pixel2_recents_tf_used">TF swap used %1$s</string>
++    <string name="pixel2_recents_tf_off">TF swap off</string>
++</resources>
+--- /dev/null
++++ b/packages/apps/Trebuchet/quickstep/res/values-b+zh+Hant/pixel2_recents_memory.xml
+@@ -0,0 +1,6 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="pixel2_recents_ram_available">可用記憶體 %1$s</string>
++    <string name="pixel2_recents_tf_used">TF 交換已用 %1$s</string>
++    <string name="pixel2_recents_tf_off">TF 交換未啟用</string>
++</resources>
+--- /dev/null
++++ b/packages/apps/Trebuchet/quickstep/res/values-zh/pixel2_recents_memory.xml
+@@ -0,0 +1,6 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="pixel2_recents_ram_available">可用内存 %1$s</string>
++    <string name="pixel2_recents_tf_used">TF 交换已用 %1$s</string>
++    <string name="pixel2_recents_tf_off">TF 交换未启用</string>
++</resources>
+--- /dev/null
++++ b/packages/apps/Trebuchet/quickstep/src/com/android/quickstep/views/OverviewMemoryStats.java
+@@ -0,0 +1,71 @@
++package com.android.quickstep.views;
++
++import java.io.BufferedReader;
++import java.io.FileReader;
++import java.io.IOException;
++
++final class OverviewMemoryStats {
++    private static final String TF_SWAP = "/data/pixel2-swap/swapfile";
++    private static final String UNKNOWN = "—";
++
++    private OverviewMemoryStats() {}
++
++    static String availableRam() {
++        try (BufferedReader reader = new BufferedReader(new FileReader("/proc/meminfo"))) {
++            return availableRam(reader);
++        } catch (IOException | SecurityException | NumberFormatException e) {
++            return UNKNOWN;
++        }
++    }
++
++    static String availableRam(BufferedReader reader) throws IOException {
++        long total = -1;
++        long available = -1;
++        String line;
++        while ((line = reader.readLine()) != null) {
++            if (line.startsWith("MemTotal:")) {
++                total = kibField(line);
++            } else if (line.startsWith("MemAvailable:")) {
++                available = kibField(line);
++            }
++            if (total >= 0 && available >= 0) return range(available, total);
++        }
++        return UNKNOWN;
++    }
++
++    private static long kibField(String line) {
++        String[] fields = line.trim().split("\\s+");
++        return fields.length == 3 && "kB".equals(fields[2]) ? Long.parseLong(fields[1]) : -1;
++    }
++
++    /** A null result means the swap table was readable and contained no active TF swapfile. */
++    static String tfSwapUsage() {
++        try (BufferedReader reader = new BufferedReader(new FileReader("/proc/swaps"))) {
++            return tfSwapUsage(reader);
++        } catch (IOException | SecurityException | NumberFormatException e) {
++            return UNKNOWN;
++        }
++    }
++
++    static String tfSwapUsage(BufferedReader reader) throws IOException {
++        String header = reader.readLine();
++        if (header == null || !header.trim().matches("Filename\\s+Type\\s+Size\\s+Used\\s+Priority")) {
++            return UNKNOWN;
++        }
++        String line;
++        while ((line = reader.readLine()) != null) {
++            String[] fields = line.trim().split("\\s+");
++            if (TF_SWAP.equals(fields[0])) {
++                if (fields.length != 5 || !"file".equals(fields[1])) return UNKNOWN;
++                return range(Long.parseLong(fields[3]), Long.parseLong(fields[2]));
++            }
++        }
++        return null;
++    }
++
++    private static String range(long amountKiB, long capacityKiB) {
++        if (capacityKiB <= 0 || amountKiB < 0 || amountKiB > capacityKiB) return UNKNOWN;
++        String amount = amountKiB > 0 && amountKiB < 1024 ? "<1" : Long.toString((amountKiB + 512) / 1024);
++        return amount + " / " + ((capacityKiB + 512) / 1024) + " MiB";
++    }
++}
+--- /dev/null
++++ b/packages/apps/Trebuchet/quickstep/src/com/android/quickstep/views/OverviewMemoryView.java
+@@ -0,0 +1,54 @@
++package com.android.quickstep.views;
++
++import static com.android.launcher3.util.Executors.MAIN_EXECUTOR;
++import static com.android.launcher3.util.Executors.THREAD_POOL_EXECUTOR;
++
++import android.content.Context;
++import android.text.TextUtils;
++import android.view.Gravity;
++import android.widget.TextView;
++
++import com.android.launcher3.R;
++
++final class OverviewMemoryView extends TextView {
++    private final Runnable mRefresh = this::refresh;
++    private int mGeneration;
++    private boolean mVisible;
++
++    OverviewMemoryView(Context context) {
++        super(context);
++        setGravity(Gravity.END);
++        setTextSize(14);
++        setIncludeFontPadding(false);
++        setFocusable(false);
++        setClickable(false);
++        setVisibility(GONE);
++    }
++
++    @Override
++    public void onVisibilityAggregated(boolean visible) {
++        super.onVisibilityAggregated(visible);
++        if (visible == mVisible) return;
++        mVisible = visible;
++        mGeneration++;
++        removeCallbacks(mRefresh);
++        if (visible) refresh();
++    }
++
++    private void refresh() {
++        int generation = mGeneration;
++        THREAD_POOL_EXECUTOR.execute(() -> {
++            String ram = OverviewMemoryStats.availableRam();
++            String swap = OverviewMemoryStats.tfSwapUsage();
++            MAIN_EXECUTOR.execute(() -> {
++                if (!mVisible || generation != mGeneration) return;
++                String memoryLine = getResources().getString(R.string.pixel2_recents_ram_available, ram);
++                String swapLine = swap == null ? getResources().getString(R.string.pixel2_recents_tf_off)
++                        : getResources().getString(R.string.pixel2_recents_tf_used, swap);
++                String text = memoryLine + "\n" + swapLine;
++                if (!TextUtils.equals(getText(), text)) setText(text);
++                postDelayed(mRefresh, 2000);
++            });
++        });
++    }
++}
+--- a/packages/apps/Trebuchet/quickstep/src/com/android/quickstep/views/RecentsView.java
++++ b/packages/apps/Trebuchet/quickstep/src/com/android/quickstep/views/RecentsView.java
+@@ -94,6 +94,7 @@
+ import android.util.Pair;
+ import android.util.SparseBooleanArray;
+ import android.view.HapticFeedbackConstants;
++import android.view.Gravity;
+ import android.view.InputDevice;
+ import android.view.KeyEvent;
+ import android.view.LayoutInflater;
+@@ -146,6 +147,7 @@
+ import com.android.launcher3.util.Themes;
+ import com.android.launcher3.util.TranslateEdgeEffect;
+ import com.android.launcher3.util.ViewPool;
++import com.android.launcher3.views.BaseDragLayer;
+ import com.android.quickstep.AnimatedFloat;
+ import com.android.quickstep.BaseActivityInterface;
+ import com.android.quickstep.GestureState;
+@@ -654,6 +656,7 @@
+     private TaskView mMovingTaskView;
+ 
+     private OverviewActionsView mActionsView;
++    private OverviewMemoryView mMemoryView;
+ 
+     private MultiWindowModeChangedListener mMultiWindowModeChangedListener =
+             new MultiWindowModeChangedListener() {
+@@ -867,8 +870,26 @@
+         updateTaskStackListenerState();
+     }
+ 
++    private void updateMemoryVisibility() {
++        if (mMemoryView != null) {
++            mMemoryView.setVisibility(mOverviewStateEnabled && getVisibility() == VISIBLE
++                    && mContentAlpha > 0 ? VISIBLE : GONE);
++        }
++    }
++
+     public void init(OverviewActionsView actionsView, SplitSelectStateController splitController) {
+         mActionsView = actionsView;
++        mMemoryView = new OverviewMemoryView(getContext());
++        mMemoryView.setTextColor(((android.widget.TextView) actionsView.findViewById(
++                R.id.action_screenshot)).getTextColors());
++        int margin = Math.round(12 * getResources().getDisplayMetrics().density);
++        BaseDragLayer.LayoutParams memoryParams = new BaseDragLayer.LayoutParams(
++                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
++        memoryParams.gravity = Gravity.TOP | Gravity.END;
++        memoryParams.setMarginEnd(margin);
++        memoryParams.topMargin = margin;
++        mActivity.getDragLayer().addView(mMemoryView, memoryParams);
++        updateMemoryVisibility();
+         mActionsView.updateHiddenFlags(HIDDEN_NO_TASKS, getTaskViewCount() == 0);
+         mSplitSelectStateController = splitController;
+         mActionClearAllButton = (Button) mActionsView.findViewById(R.id.action_clear_all);
+@@ -1155,6 +1176,7 @@
+ 
+     public void setOverviewStateEnabled(boolean enabled) {
+         mOverviewStateEnabled = enabled;
++        updateMemoryVisibility();
+         mPadBarAction = View.NO_ID;
+         mPadPressedAction = View.NO_ID;
+         mPadActionKey = KeyEvent.KEYCODE_UNKNOWN;
+@@ -3629,6 +3651,10 @@
+         mEmptyMessagePaint.setAlpha(alphaInt);
+         mEmptyIcon.setAlpha(alphaInt);
+         mActionsView.getContentAlpha().setValue(mContentAlpha);
++        if (mMemoryView != null) {
++            mMemoryView.setAlpha(mContentAlpha);
++            updateMemoryVisibility();
++        }
+ 
+         if (alpha > 0) {
+             setVisibility(VISIBLE);
+@@ -3653,6 +3679,7 @@
+     @Override
+     public void setVisibility(int visibility) {
+         super.setVisibility(visibility);
++        updateMemoryVisibility();
+         if (mActionsView != null) {
+             mActionsView.updateHiddenFlags(HIDDEN_NO_RECENTS, visibility != VISIBLE);
+             if (visibility != VISIBLE) {

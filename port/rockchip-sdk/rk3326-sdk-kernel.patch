@@ -1,0 +1,48 @@
+diff --git a/arch/arm64/boot/dts/rockchip/Makefile b/arch/arm64/boot/dts/rockchip/Makefile
+index f65a4ebe5fe0..9c56781341a3 100644
+--- a/arch/arm64/boot/dts/rockchip/Makefile
++++ b/arch/arm64/boot/dts/rockchip/Makefile
+@@ -22,6 +22,7 @@ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3326-evb-ai-va-v11.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3326-evb-ai-va-v11-i2s-dmic.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3326-evb-ai-va-v12.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3326-evb-lp3-v10.dtb
++dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3326-gkd-pixel2.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3326-evb-lp3-v10-avb.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3326-evb-lp3-v10-linux.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3326-evb-lp3-v10-robot-linux.dtb
+diff --git a/drivers/boardinfo/boardinfo.c b/drivers/boardinfo/boardinfo.c
+index b2e2033c4536..342d826c1cfa 100644
+--- a/drivers/boardinfo/boardinfo.c
++++ b/drivers/boardinfo/boardinfo.c
+@@ -71,6 +71,10 @@ static int board_info_probe(struct platform_device *pdev)
+ 
+ int get_board_model(void)
+ {
++	/* Tinker-specific callers may run before this board has a probe. */
++	if (!model)
++		return -1;
++
+ 	if (!strcmp("rk3288", model))
+ 		return 3288;
+ 	else if (!strcmp("rk3399", model))
+diff --git a/scripts/gcc-wrapper.py b/scripts/gcc-wrapper.py
+index 7ea0ef87cfa0..c7805547e4f6 100755
+--- a/scripts/gcc-wrapper.py
++++ b/scripts/gcc-wrapper.py
+@@ -53,6 +53,16 @@ allowed_warnings = set([
+     "memcontrol.c:5337", # mm/memcontrol.c:5337:12: warning: initialization from incompatible pointer type
+     "atags_to_fdt.c:99", # arch/arm/boot/compressed/atags_to_fdt.c:99:1: warning: the frame size of 1032 bytes is larger than 1024 bytes
+     "drm_edid.c:3506", # drivers/gpu/drm/drm_edid.c:3506:13: warning: 'cea_db_is_hdmi_forum_vsdb' defined but not used
++    # Existing unused TinkerBoard helpers and C90 declaration in panel-simple.c.
++    "panel-simple.c:84",
++    "panel-simple.c:88",
++    "panel-simple.c:89",
++    "panel-simple.c:90",
++    "panel-simple.c:93",
++    "panel-simple.c:110",
++    "panel-simple.c:111",
++    "panel-simple.c:817",
++    "panel-simple.c:4138",
+     # W=1
+     "bounds.c:15", # kernel/bounds.c:15:6: warning: no previous prototype for ‘foo’
+     "cpufeature.h:157", # arch/arm64/include/asm/cpufeature.h:157:68: warning: signed and unsigned type in conditional expression

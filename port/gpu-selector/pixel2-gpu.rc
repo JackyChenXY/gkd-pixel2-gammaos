@@ -1,0 +1,18 @@
+service pixel2-gpu /system/bin/pixel2-gpu
+    class core
+    user root
+    group root
+    capabilities DAC_OVERRIDE
+    seclabel u:r:hal_bootctl_default:s0
+    socket pixel2_gpu stream 0660 root system u:object_r:socket_device:s0
+
+service pixel2-gpu-ack /system/bin/pixel2-gpu complete
+    disabled
+    oneshot
+    user root
+    group root
+    capabilities DAC_OVERRIDE
+    seclabel u:r:hal_bootctl_default:s0
+
+on property:sys.boot_completed=1
+    start pixel2-gpu-ack

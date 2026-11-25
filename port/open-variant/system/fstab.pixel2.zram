@@ -1,0 +1,1 @@
+/dev/block/zram0 none swap defaults wait,zramsize=75%,swapprio=100

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Long-press Power opens the Android power menu. -->
+    <integer name="config_longPressOnPowerBehavior">1</integer>
+</resources>

@@ -1,0 +1,1074 @@
+--- a/src/gallium/drivers/panfrost/pan_cmdstream.c
++++ b/src/gallium/drivers/panfrost/pan_cmdstream.c
+@@ -1732,6 +1732,7 @@
+ 
+       panfrost_update_sampler_view(view, &ctx->base);
+       out[i] = view->bifrost_descriptor;
++      if (stage == PIPE_SHADER_FRAGMENT && rsrc->p2_can_defer) p2_note_sample(rsrc);
+ 
+       panfrost_batch_read_rsrc(batch, rsrc, stage);
+       panfrost_batch_add_bo(batch, view->state.bo, stage);
+--- a/src/gallium/drivers/panfrost/pan_context.c
++++ b/src/gallium/drivers/panfrost/pan_context.c
+@@ -107,6 +107,7 @@
+ 
+    /* Submit all pending jobs */
+    panfrost_flush_all_batches(ctx, NULL);
++   if (pan_screen(pipe->screen)->p2_defer) p2_deferred_flush(ctx,flags);
+ 
+    if (fence) {
+       struct pipe_fence_handle *f = panfrost_fence_create(ctx);
+@@ -125,12 +126,22 @@
+    panfrost_flush_all_batches(ctx, "Texture barrier");
+ }
+ 
++static enum pipe_reset_status
++p2_get_reset(struct pipe_context *pipe)
++{
++   return pan_context(pipe)->p2_lost ? PIPE_UNKNOWN_CONTEXT_RESET : PIPE_NO_RESET;
++}
++static void
++p2_set_reset(struct pipe_context *pipe, const struct pipe_device_reset_callback *cb)
++{
++   pan_context(pipe)->p2_reset = cb ? *cb : (struct pipe_device_reset_callback){0};
++}
+ static void
+ panfrost_set_frontend_noop(struct pipe_context *pipe, bool enable)
+ {
+    struct panfrost_context *ctx = pan_context(pipe);
+    panfrost_flush_all_batches(ctx, "Frontend no-op change");
+-   ctx->is_noop = enable;
++   ctx->is_noop = enable || ctx->p2_lost;
+ }
+ 
+ static void
+@@ -1021,6 +1032,10 @@
+    gallium->clear_texture = u_default_clear_texture;
+    gallium->texture_barrier = panfrost_texture_barrier;
+    gallium->set_frontend_noop = panfrost_set_frontend_noop;
++   if (pan_screen(screen)->p2_defer) {
++      gallium->get_device_reset_status = p2_get_reset;
++      gallium->set_device_reset_callback = p2_set_reset;
++   }
+ 
+    gallium->set_vertex_buffers = panfrost_set_vertex_buffers;
+    gallium->set_constant_buffer = panfrost_set_constant_buffer;
+--- a/src/gallium/drivers/panfrost/pan_context.h
++++ b/src/gallium/drivers/panfrost/pan_context.h
+@@ -123,6 +123,8 @@
+ struct panfrost_context {
+    /* Gallium context */
+    struct pipe_context base;
++   unsigned pixel2_shadow_mode;
++   bool p2_inside_pack;
+ 
+    /* Context flags */
+    unsigned flags;
+@@ -231,7 +233,8 @@
+    bool cond_cond;
+    enum pipe_render_cond_flag cond_mode;
+ 
+-   bool is_noop;
++   bool is_noop, p2_lost;
++   struct pipe_device_reset_callback p2_reset;
+ 
+    /* Mask of active render targets */
+    uint8_t fb_rt_mask;
+--- a/src/gallium/drivers/panfrost/pan_job.c
++++ b/src/gallium/drivers/panfrost/pan_job.c
+@@ -380,6 +380,7 @@
+                           struct panfrost_resource *rsrc,
+                           enum pipe_shader_type stage)
+ {
++   if (rsrc->p2_can_defer) p2_note_write(rsrc);
+    uint32_t access = PAN_BO_ACCESS_WRITE | panfrost_access_for_stage(stage);
+ 
+    panfrost_batch_add_bo_old(batch, rsrc->bo, access);
+--- a/src/gallium/drivers/panfrost/pan_resource.c
++++ b/src/gallium/drivers/panfrost/pan_resource.c
+@@ -32,6 +32,17 @@
+  */
+ 
+ #include <fcntl.h>
++#include <inttypes.h>
++#include <limits.h>
++#include "util/u_inlines.h"
++#include "util/os_time.h"
++#include "util/u_atomic.h"
++#include "util/u_blitter.h"
++#include <unistd.h>
++#include "util/log.h"
++#ifdef ANDROID
++#include <sys/system_properties.h>
++#endif
+ #include <xf86drm.h>
+ #include "drm-uapi/drm_fourcc.h"
+ 
+@@ -54,6 +65,366 @@
+ #include "pan_tiling.h"
+ #include "pan_util.h"
+ 
++/* Run only between submitted batches on a screen with one pipe context.
++ * We never retain a resource beyond the application's own bound sampler view. */
++static bool p2_raw_restore(struct panfrost_resource *r);
++static pthread_mutex_t p2_defer_lock = PTHREAD_MUTEX_INITIALIZER;
++static pthread_mutex_t p2_recent_lock = PTHREAD_MUTEX_INITIALIZER;
++static unsigned
++p2_defer_option(void)
++{
++   const char *s = getenv("PIXEL2_DEFER_AFBC");
++#ifdef ANDROID
++   char prop[PROP_VALUE_MAX];
++   if (!s) {
++      const char target[] = "org.github.krkr2";
++      char proc[sizeof(target)];
++      int fd = open("/proc/self/cmdline", O_RDONLY | O_CLOEXEC);
++      if (fd < 0) return false;
++      ssize_t n = read(fd,proc,sizeof(proc));
++      close(fd);
++      if (n != sizeof(proc) || memcmp(proc,target,sizeof(target)) ||
++          !__system_property_get("debug.pixel2.krkr.afbc",prop)) return false;
++      s=prop;
++   }
++#endif
++   if (!s) return 0;
++   if (!strcmp(s,"compact")) return 1;
++   if (!strcmp(s,"recent")) return 2;
++   if (!strcmp(s,"survival")) return 3;
++   return 0;
++}
++static inline uint32_t p2_ms(void) { return (uint32_t)(os_time_get_nano() / 1000000); }
++
++static bool
++p2_new_candidate(struct panfrost_resource *r)
++{
++   return pan_screen(r->base.screen)->p2_defer &&
++      r->base.target == PIPE_TEXTURE_2D &&
++      r->base.format == PIPE_FORMAT_R8G8B8A8_UNORM &&
++      !(r->base.flags & (PIPE_RESOURCE_FLAG_MAP_PERSISTENT|PIPE_RESOURCE_FLAG_MAP_COHERENT)) &&
++      r->base.array_size == 1 && r->base.last_level == 0 &&
++      r->base.nr_samples <= 1 && !r->modifier_constant &&
++      r->image.layout.data_size >= (4u<<20) &&
++      r->image.layout.data_size <= (32u<<20) &&
++      !r->scanout && !(r->bo->flags & PAN_BO_SHARED) &&
++      (r->base.bind == (PIPE_BIND_RENDER_TARGET|PIPE_BIND_SAMPLER_VIEW)) &&
++      panfrost_should_pack_afbc(pan_device(r->base.screen),r);
++}
++/* The registry owns no references. In survival mode, register the attachment
++ * when work writes it, since the next few uploads may precede any sampling. */
++static void
++p2_register_resource(struct panfrost_resource *r)
++{
++   struct panfrost_screen *s = pan_screen(r->base.screen);
++   if (p_atomic_read(&r->p2_listed)) return;
++   pthread_mutex_lock(&p2_recent_lock);
++   if (!p_atomic_read(&r->p2_listed)) {
++      list_addtail(&r->p2_recent_link, &s->p2_recent_list);
++      p_atomic_set(&r->p2_listed, 1);
++   }
++   pthread_mutex_unlock(&p2_recent_lock);
++}
++void
++p2_note_write(struct panfrost_resource *r)
++{
++   if (!r->p2_can_defer) return;
++   p_atomic_set(&r->p2_last_write, p2_ms());
++   if (pan_screen(r->base.screen)->p2_defer == 3)
++      p2_register_resource(r);
++}
++void
++p2_note_sample(struct panfrost_resource *r)
++{
++   if (!r->p2_can_defer) return;
++   if (!p_atomic_read(&r->p2_sampled)) p_atomic_set(&r->p2_sampled, 1);
++   if (pan_screen(r->base.screen)->p2_defer < 2) return;
++   p_atomic_set(&r->p2_last_sample,p2_ms());
++   p2_register_resource(r);
++}
++static bool
++p2_is_attached(struct panfrost_context *ctx, struct panfrost_resource *r)
++{
++   const struct pipe_framebuffer_state *f=&ctx->pipe_framebuffer;
++   for (unsigned i=0;i<f->nr_cbufs;i++)
++      if (f->cbufs[i] && f->cbufs[i]->texture == &r->base) return true;
++   return f->zsbuf && f->zsbuf->texture == &r->base;
++}
++static bool
++p2_eligible_now(struct panfrost_context *ctx, struct panfrost_resource *r, uint32_t now)
++{
++   struct panfrost_screen *s=pan_screen(ctx->base.screen);
++   if (!r->p2_can_defer || r->p2_tried || !p2_new_candidate(r)) {++s->p2_ineligible;return false;}
++   if ((s->p2_defer != 3 && !p_atomic_read(&r->p2_sampled)) || !BITSET_TEST(r->valid.data,0)) {++s->p2_invalid;return false;}
++   if (p2_is_attached(ctx,r)) {++s->p2_attached;return false;}
++   unsigned quiet_ms = s->p2_defer == 3 ? (r->p2_retries ? 500 : 100) : 750;
++   if (now-p_atomic_read(&r->p2_last_write)<quiet_ms) {++s->p2_recent;return false;}
++   return true;
++}
++
++/* The registry holds no Gallium references. The destroy hook removes the entry
++ * before freeing any resource fields; never revive a zero-count resource. */
++static bool
++p2_try_get(struct panfrost_resource *r)
++{
++   int old = p_atomic_read(&r->base.reference.count);
++   while (old > 0 && old < INT_MAX) {
++      int was = p_atomic_cmpxchg(&r->base.reference.count,old,old+1);
++      if (was == old) {
++         debug_reference(&r->base.reference,(debug_reference_descriptor)debug_describe_resource,1);
++         return true;
++      }
++      old=was;
++   }
++   return false;
++}
++static void
++p2_forget(struct panfrost_resource *r)
++{
++   if (!p_atomic_read(&r->p2_listed)) return;
++   pthread_mutex_lock(&p2_recent_lock);
++   list_del(&r->p2_recent_link);
++   pthread_mutex_unlock(&p2_recent_lock);
++}
++
++static void
++p2_register_context(struct panfrost_screen *s)
++{
++   if (!s->p2_defer) return;
++   pthread_mutex_lock(&p2_defer_lock);
++   ++s->p2_contexts_ever;
++   mesa_logi("P2AFBC ready contexts=%u min=4194304 stable_ms=750",s->p2_contexts_ever);
++   if (s->p2_defer >= 2) mesa_logi("P2AFBC registry enabled policy=%u", s->p2_defer);
++   pthread_mutex_unlock(&p2_defer_lock);
++}
++void
++p2_deferred_flush(struct panfrost_context *ctx, unsigned flags)
++{
++   struct panfrost_screen *s=pan_screen(ctx->base.screen);
++   if (!s->p2_defer || ctx->p2_inside_pack ||
++       (flags & (PIPE_FLUSH_DEFERRED|PIPE_FLUSH_TOP_OF_PIPE)) ||
++       ((flags & PIPE_FLUSH_ASYNC) && !(flags & PIPE_FLUSH_HINT_FINISH)) ||
++       (ctx->blitter && ctx->blitter->running)) return;
++   pthread_mutex_lock(&p2_defer_lock);
++   enum { P2_BURST_CAP = 3, P2_PRESSURE_CAP = 6, P2_BURST_GAP_MS = 3000, P2_BURST_BUDGET_MS = 500 };
++   uint32_t start=p2_ms(), now=start;
++   uint32_t gap=s->p2_flushes ? start-s->p2_last_outer : 0;
++   s->p2_last_outer=start;
++   ++s->p2_flushes;
++   bool survival=s->p2_defer == 3;
++   bool prealloc=survival && flags == PIPE_FLUSH_HINT_FINISH;
++   bool slow=s->p2_defer>=2 && gap>=P2_BURST_GAP_MS;
++   unsigned cap=prealloc ? P2_PRESSURE_CAP : (slow ? P2_BURST_CAP : 1);
++   unsigned attempts=0, packed=0;
++   struct pipe_resource *held[P2_PRESSURE_CAP]={NULL};
++   unsigned unsampled=0;
++   bool budget_hit=false;
++   if (s->p2_contexts_ever!=1) {++s->p2_multi; goto summary;}
++   if (ctx->p2_lost) goto summary;
++   if (slow) ++s->p2_burst_opportunities;
++   if (!prealloc && s->p2_attempts && now-s->p2_last_attempt<250) goto summary;
++   while (attempts<cap) {
++      now=p2_ms();
++      if (!prealloc && attempts && now-start>=P2_BURST_BUDGET_MS) {
++         budget_hit=true;
++         ++s->p2_burst_budget_hits;
++         break;
++      }
++      if (ctx->p2_lost) break;
++      struct panfrost_resource *r=NULL;
++      if (s->p2_defer >= 2) {
++         /* Hold each selected registry resource through the outer flush. */
++         pthread_mutex_lock(&p2_recent_lock);
++         struct panfrost_resource *best=NULL;
++         list_for_each_entry(struct panfrost_resource, item, &s->p2_recent_list,p2_recent_link) {
++            ++s->p2_recent_walked;
++            if (!p_atomic_read(&item->base.reference.count)) {++s->p2_unreferenced;continue;}
++            if (!survival && now-p_atomic_read(&item->p2_last_sample)>4000) {++s->p2_expired;continue;}
++            if (!p2_eligible_now(ctx,item,now)) continue;
++            if (!best || item->image.layout.data_size > best->image.layout.data_size) best=item;
++         }
++         if (best && p2_try_get(best)) {r=best;held[attempts]=&r->base;}
++         pthread_mutex_unlock(&p2_recent_lock);
++      } else {
++         for (unsigned i=0;i<ctx->sampler_view_count[PIPE_SHADER_FRAGMENT];i++) {
++            struct pipe_sampler_view *view=(struct pipe_sampler_view *)ctx->sampler_views[PIPE_SHADER_FRAGMENT][i];
++            if (!view) continue;
++            ++s->p2_bound;
++            struct panfrost_resource *item=pan_resource(view->texture);
++            if (p2_eligible_now(ctx,item,now)) {r=item;break;}
++         }
++      }
++      if (!r) break;
++      {
++         r->p2_tried=true;
++         ctx->p2_inside_pack=true;
++         ++attempts;
++         ++s->p2_attempts; s->p2_last_attempt=now;
++         uint64_t before=panfrost_bo_size(r->bo);
++         mesa_logi("P2AFBC attempt=%" PRIu64 " id=%" PRIu64 " size=%" PRIu64 " wh=%ux%u",
++                   s->p2_attempts,r->p2_id,before,r->base.width0,r->base.height0);
++         panfrost_pack_afbc(ctx,r);
++         ctx->p2_inside_pack=false;
++         uint64_t after=panfrost_bo_size(r->bo);
++         bool changed=!(r->image.layout.modifier & AFBC_FORMAT_MOD_SPARSE);
++         if (changed) {
++            ++packed;
++            if (!p_atomic_read(&r->p2_sampled)) ++unsampled;
++            ++s->p2_success;s->p2_before+=before;s->p2_after+=after;
++            panfrost_dirty_state_all(ctx);
++         }
++         mesa_logi("P2AFBC result id=%" PRIu64 " packed=%u before=%" PRIu64 " after=%" PRIu64,
++                   r->p2_id,changed,before,after);
++      }
++   }
++   now=p2_ms();
++   if (prealloc)
++      mesa_logi("P2Survival prealloc=%" PRIu64 " attempted=%u packed=%u before_first_sample=%u elapsed_ms=%u",
++                s->p2_flushes, attempts, packed, unsampled, now-start);
++   if (attempts>1) {
++      ++s->p2_burst_multi;
++      s->p2_burst_extra+=attempts-1;
++   }
++   if (slow && attempts)
++      mesa_logi("P2Burst flush=%" PRIu64 " gap_ms=%u cap=%u attempts=%u packed=%u elapsed_ms=%u budget_hit=%u",
++                s->p2_flushes,gap,cap,attempts,packed,now-start,budget_hit);
++summary:
++   if (!s->p2_last_stats || now-s->p2_last_stats>=5000) {
++      s->p2_last_stats=now;
++      if (s->p2_defer==2)
++         mesa_logi("P2Burst stats opportunities=%" PRIu64 " multi=%" PRIu64
++                   " extra_attempts=%" PRIu64 " budget_hits=%" PRIu64,
++                   s->p2_burst_opportunities,s->p2_burst_multi,s->p2_burst_extra,s->p2_burst_budget_hits);
++      if (s->p2_defer>=2)
++         mesa_logi("P2AFBC registry scanned=%" PRIu64 " expired=%" PRIu64 " dying=%" PRIu64,
++                   s->p2_recent_walked,s->p2_expired,s->p2_unreferenced);
++      mesa_logi("P2AFBC stats flush=%" PRIu64 " bound=%" PRIu64 " skip_shape_or_tried=%" PRIu64
++                " skip_recent=%" PRIu64 " skip_fbo=%" PRIu64 " skip_undefined=%" PRIu64 " skip_multi=%" PRIu64
++                " attempts=%" PRIu64 " packed=%" PRIu64 " before=%" PRIu64 " after=%" PRIu64,
++                s->p2_flushes,s->p2_bound,s->p2_ineligible,s->p2_recent,s->p2_attached,s->p2_invalid,
++                s->p2_multi,s->p2_attempts,s->p2_success,s->p2_before,s->p2_after);
++   }
++   pthread_mutex_unlock(&p2_defer_lock);
++   /* Final references can invoke resource destruction. Neither scheduling
++    * nor registry locks may be held when releasing any of these references. */
++   for (unsigned i=0;i<attempts;i++)
++      if (held[i]) pipe_resource_reference(&held[i],NULL);
++}
++
++enum { P2_SAMPLE, P2_RENDER_SAMPLE, P2_RENDER, P2_DEPTH, P2_BUFFER, P2_OTHER, P2_EXTERNAL, P2_KINDS };
++static const char *const p2_names[] = {"sample","render_sample","render","depth","buffer","other","external"};
++struct p2_total {
++   uint64_t logical, capacity, peak_logical, peak_capacity;
++   unsigned count;
++};
++static struct p2_total p2_totals[P2_KINDS];
++static pthread_mutex_t p2_mutex = PTHREAD_MUTEX_INITIALIZER;
++static uint64_t p2_next_resource, p2_event_seq, p2_updates;
++static int64_t p2_last_snapshot;
++static bool p2_started;
++
++static unsigned
++p2_pool_mode(void)
++{
++   const char *mode = getenv("PIXEL2_RESOURCE_TRACE");
++#ifdef ANDROID
++   char prop[PROP_VALUE_MAX];
++   if (!mode) {
++      const char target[] = "org.github.krkr2";
++      char name[sizeof(target)];
++      int fd = open("/proc/self/cmdline", O_RDONLY | O_CLOEXEC);
++      if (fd < 0)
++         return 0;
++      ssize_t n = read(fd, name, sizeof(name));
++      close(fd);
++      if (n != sizeof(name) || memcmp(name, target, sizeof(target)) != 0 ||
++          !__system_property_get("debug.pixel2.krkr.resources", prop))
++         return 0;
++      mode = prop;
++   }
++#endif
++   if (!mode) return 0;
++   if (!strcmp(mode, "summary")) return 1;
++   if (!strcmp(mode, "large")) return 2;
++   if (!strcmp(mode, "all")) return 3;
++   return 0;
++}
++
++static unsigned
++p2_kind(const struct panfrost_resource *r)
++{
++   unsigned b = r->base.bind;
++   if (r->p2_import || (r->bo->flags & PAN_BO_SHARED) ||
++       (b & (PIPE_BIND_SCANOUT|PIPE_BIND_DISPLAY_TARGET|PIPE_BIND_SHARED)))
++      return P2_EXTERNAL;
++   if (r->base.target == PIPE_BUFFER) return P2_BUFFER;
++   if (b & PIPE_BIND_DEPTH_STENCIL) return P2_DEPTH;
++   if (b & PIPE_BIND_RENDER_TARGET)
++      return (b & PIPE_BIND_SAMPLER_VIEW) ? P2_RENDER_SAMPLE : P2_RENDER;
++   return (b & PIPE_BIND_SAMPLER_VIEW) ? P2_SAMPLE : P2_OTHER;
++}
++
++/* Per-wrapper layout and BO capacity. Objects shared by multiple wrappers
++ * intentionally contribute to each category; the optional event stream carries
++ * stable per-resource IDs plus device/handle pairs for host-side deduplication. */
++static void
++p2_account(struct panfrost_resource *r, const char *reason, bool destroy)
++{
++   if (!r->p2_mode) return;
++   pthread_mutex_lock(&p2_mutex);
++   if (!p2_started) {
++      p2_started = true;
++      mesa_logi("P2Pool ready mode=%u summary=count/logical/capacity/peakLogical/peakCapacity", r->p2_mode);
++   }
++   if (!r->p2_id)
++      r->p2_id = ++p2_next_resource;
++   uint64_t before = r->p2_capacity;
++   if (r->p2_live) {
++      struct p2_total *t = &p2_totals[r->p2_kind];
++      t->count--; t->logical -= r->p2_layout; t->capacity -= before;
++   }
++   if (!destroy) {
++      r->p2_kind = p2_kind(r);
++      r->p2_layout = r->image.layout.data_size;
++      r->p2_capacity = panfrost_bo_size(r->bo);
++      struct p2_total *t = &p2_totals[r->p2_kind];
++      t->count++; t->logical += r->p2_layout; t->capacity += r->p2_capacity;
++      t->peak_logical = MAX2(t->peak_logical, t->logical);
++      t->peak_capacity = MAX2(t->peak_capacity, t->capacity);
++   }
++   bool emit = r->p2_mode == 3 || (r->p2_mode == 2 &&
++               MAX2(before, r->p2_capacity) >= (1u<<20));
++   if (emit) {
++      mesa_logi("P2Pool ev=%" PRIu64 " id=%" PRIu64 " op=%s c=%s dev=%p bo=%u layout=%" PRIu64
++                " cap=%" PRIu64 " fmt=%s whd=%ux%ux%u layers=%u samples=%u levels=%u mod=%" PRIx64
++                " bind=%x imported=%u target=%u",
++                ++p2_event_seq, r->p2_id, reason, p2_names[r->p2_kind],
++                (void *)r->bo->dev, panfrost_bo_handle(r->bo), r->p2_layout, r->p2_capacity,
++                util_format_name(r->image.layout.format), r->base.width0,
++                r->base.height0, r->base.depth0, r->base.array_size,
++                MAX2(1,r->base.nr_samples), r->base.last_level + 1,
++                r->image.layout.modifier, r->base.bind, r->p2_import, (unsigned)r->base.target);
++   }
++   r->p2_live = !destroy;
++   ++p2_updates;
++   struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
++   if (p2_updates <= 2 || ts.tv_sec - p2_last_snapshot >= 2) {
++      p2_last_snapshot = ts.tv_sec;
++      char out[1024]; size_t used=0;
++      for (unsigned i=0; i<P2_KINDS; ++i) {
++         const struct p2_total *t = &p2_totals[i];
++         int n = snprintf(out+used, sizeof(out)-used,
++                          " %s=%u/%" PRIu64 "/%" PRIu64 "/%" PRIu64 "/%" PRIu64,
++                          p2_names[i], t->count, t->logical, t->capacity,
++                          t->peak_logical, t->peak_capacity);
++         if (n<0 || (size_t)n>=sizeof(out)-used) break;
++         used+=(size_t)n;
++      }
++      mesa_logi("P2Pool sum=%" PRIu64 " ev=%" PRIu64 "%s",p2_updates,p2_event_seq,out);
++   }
++   pthread_mutex_unlock(&p2_mutex);
++}
++
+ static void
+ panfrost_clear_depth_stencil(struct pipe_context *pipe,
+                              struct pipe_surface *dst, unsigned clear_flags,
+@@ -66,6 +437,9 @@
+    if (render_condition_enabled && !panfrost_render_condition_check(ctx))
+       return;
+ 
++   if (pan_resource(dst->texture)->p2_raw)
++      pan_legalize_format(ctx, pan_resource(dst->texture), dst->format, true, false);
++   if (ctx->p2_lost) return;
+    panfrost_blitter_save(
+       ctx, render_condition_enabled ? PAN_RENDER_COND : PAN_RENDER_BASE);
+    util_blitter_clear_depth_stencil(ctx->blitter, dst, clear_flags, depth,
+@@ -84,6 +458,9 @@
+    if (render_condition_enabled && !panfrost_render_condition_check(ctx))
+       return;
+ 
++   if (pan_resource(dst->texture)->p2_raw)
++      pan_legalize_format(ctx, pan_resource(dst->texture), dst->format, true, false);
++   if (ctx->p2_lost) return;
+    panfrost_blitter_save(
+       ctx, render_condition_enabled ? PAN_RENDER_COND : PAN_RENDER_BASE);
+    util_blitter_clear_render_target(ctx->blitter, dst, color, dstx, dsty, width,
+@@ -164,6 +541,9 @@
+       /* failure is expected in some cases.. */
+    }
+ 
++   rsc->p2_mode = pan_screen(pscreen)->p2_pool_mode;
++   rsc->p2_import = true;
++   p2_account(rsc, "create", false);
+    return prsc;
+ }
+ 
+@@ -182,6 +562,7 @@
+       return false;
+ 
+    rsrc = pan_resource(plane_res);
++   if (!p2_raw_restore(rsrc)) return false;
+    scanout = rsrc->scanout;
+ 
+    handle->modifier = rsrc->image.layout.modifier;
+@@ -198,6 +579,7 @@
+          return false;
+ 
+       handle->handle = fd;
++      p2_account(rsrc,"export",false);
+    } else {
+       /* Other handle types not supported */
+       return false;
+@@ -219,6 +601,7 @@
+    struct pipe_resource *plane_res = util_resource_at_index(prsc, plane);
+    struct panfrost_resource *rsrc = pan_resource(plane_res);
+ 
++   if (rsrc && !p2_raw_restore(rsrc)) return false;
+    switch (param) {
+    case PIPE_RESOURCE_PARAM_STRIDE:
+       *value = panfrost_get_legacy_stride(&rsrc->image.layout, level);
+@@ -849,6 +1232,10 @@
+    if (template->bind & PIPE_BIND_INDEX_BUFFER)
+       so->index_cache = CALLOC_STRUCT(panfrost_minmax_cache);
+ 
++   so->p2_can_defer = p2_new_candidate(so);
++   if (so->p2_can_defer) p_atomic_set(&so->p2_last_write, p2_ms());
++   so->p2_mode = pan_screen(screen)->p2_pool_mode;
++   p2_account(so,"create",false);
+    return (struct pipe_resource *)so;
+ }
+ 
+@@ -888,6 +1275,9 @@
+    struct panfrost_device *dev = pan_device(screen);
+    struct panfrost_resource *rsrc = (struct panfrost_resource *)pt;
+ 
++   p2_forget(rsrc);
++   free(rsrc->p2_raw);
++   if (rsrc->p2_live) p2_account(rsrc,"destroy",true);
+    if (rsrc->scanout)
+       renderonly_scanout_destroy(rsrc->scanout, dev->ro);
+ 
+@@ -1183,6 +1573,102 @@
+            !(rsrc->bo->flags & PAN_BO_SHARED));
+ }
+ 
++/* Device trial: sample only the allocation site that can have two live BOs. */
++enum pixel2_shadow_mode {
++   PIXEL2_SHADOW_DEFAULT, PIXEL2_SHADOW_OBSERVE, PIXEL2_SHADOW_INPLACE
++};
++
++static unsigned
++pixel2_shadow_mode(void)
++{
++   const char *mode = getenv("PIXEL2_SHADOW_MODE");
++#ifdef ANDROID
++   char prop[PROP_VALUE_MAX];
++   if (!mode) {
++      char name[17] = {0};
++      int fd = open("/proc/self/cmdline", O_RDONLY | O_CLOEXEC);
++      if (fd < 0)
++         return PIXEL2_SHADOW_DEFAULT;
++      ssize_t n = read(fd, name, sizeof(name));
++      close(fd);
++      const char target[] = "org.github.krkr2";
++      if (n < (ssize_t)sizeof(target) ||
++          memcmp(name, target, sizeof(target)) != 0)
++         return PIXEL2_SHADOW_DEFAULT;
++      if (!__system_property_get("debug.pixel2.krkr.shadow", prop))
++         return PIXEL2_SHADOW_DEFAULT;
++      mode = prop;
++   }
++#endif
++   if (!mode)
++      return PIXEL2_SHADOW_DEFAULT;
++   if (strcmp(mode, "observe") == 0)
++      return PIXEL2_SHADOW_OBSERVE;
++   if (strcmp(mode, "inplace") == 0)
++      return PIXEL2_SHADOW_INPLACE;
++   return PIXEL2_SHADOW_DEFAULT;
++}
++
++static pthread_mutex_t pixel2_shadow_lock = PTHREAD_MUTEX_INITIALIZER;
++static unsigned pixel2_seen_modes;
++static uint64_t pixel2_candidates[3], pixel2_requested[3], pixel2_largest[3],
++                pixel2_pair_peak[3], pixel2_actual[3], pixel2_render[3],
++                pixel2_texture[3], pixel2_copy[3], pixel2_failed[3];
++static int64_t pixel2_last_log[3];
++
++static void
++pixel2_shadow_ready(unsigned mode)
++{
++   if (!mode)
++      return;
++   pthread_mutex_lock(&pixel2_shadow_lock);
++   if (!(pixel2_seen_modes & (1u << mode))) {
++      pixel2_seen_modes |= 1u << mode;
++      mesa_logi("P2Shadow ready mode=%s min_bytes=1048576",
++                mode == PIXEL2_SHADOW_INPLACE ? "inplace" : "observe");
++   }
++   pthread_mutex_unlock(&pixel2_shadow_lock);
++}
++
++static void
++pixel2_shadow_record(unsigned mode, unsigned bind, uint64_t old_size,
++                     uint64_t new_size, bool copy)
++{
++   pthread_mutex_lock(&pixel2_shadow_lock);
++   uint64_t n = ++pixel2_candidates[mode];
++   pixel2_requested[mode] += old_size;
++   pixel2_largest[mode] = MAX2(pixel2_largest[mode], old_size);
++   if (bind & PIPE_BIND_RENDER_TARGET)
++      ++pixel2_render[mode];
++   else if (bind & PIPE_BIND_SAMPLER_VIEW)
++      ++pixel2_texture[mode];
++   if (new_size) {
++      ++pixel2_actual[mode];
++      pixel2_pair_peak[mode] =
++         MAX2(pixel2_pair_peak[mode], old_size + new_size);
++      if (copy)
++         pixel2_copy[mode] += old_size;
++   } else if (mode == PIXEL2_SHADOW_OBSERVE) {
++      ++pixel2_failed[mode];
++   }
++   struct timespec ts;
++   clock_gettime(CLOCK_MONOTONIC, &ts);
++   if (n <= 2 || !(n & (n - 1)) || ts.tv_sec - pixel2_last_log[mode] >= 5) {
++      pixel2_last_log[mode] = ts.tv_sec;
++      mesa_logi("P2Shadow mode=%s candidates=%" PRIu64
++                " requested_bytes=%" PRIu64 " largest_bytes=%" PRIu64
++                " actual_pairs=%" PRIu64 " peak_pair_bytes=%" PRIu64
++                " copied_bytes=%" PRIu64 " alloc_fail=%" PRIu64
++                " rt_bind=%" PRIu64 " sampler_only=%" PRIu64 " other=%" PRIu64,
++                mode == PIXEL2_SHADOW_INPLACE ? "inplace" : "observe", n,
++                pixel2_requested[mode], pixel2_largest[mode], pixel2_actual[mode],
++                pixel2_pair_peak[mode], pixel2_copy[mode], pixel2_failed[mode],
++                pixel2_render[mode], pixel2_texture[mode],
++                n - pixel2_render[mode] - pixel2_texture[mode]);
++   }
++   pthread_mutex_unlock(&pixel2_shadow_lock);
++}
++
+ static void *
+ panfrost_ptr_map(struct pipe_context *pctx, struct pipe_resource *resource,
+                  unsigned level,
+@@ -1321,10 +1807,24 @@
+           * importer/exporter wouldn't see the change we're
+           * doing to it.
+           */
+-         if (!(bo->flags & PAN_BO_SHARED)) {
++         unsigned mode = ctx->pixel2_shadow_mode;
++         bool candidate = mode && resource->target == PIPE_TEXTURE_2D &&
++            resource->nr_samples <= 1 && panfrost_bo_size(bo) >= (1u << 20) &&
++            (usage & PIPE_MAP_WRITE) &&
++            !(usage & (PIPE_MAP_READ | PIPE_MAP_UNSYNCHRONIZED |
++                       PIPE_MAP_DONTBLOCK)) &&
++            !(resource->flags & PIPE_RESOURCE_FLAG_MAP_PERSISTENT) &&
++            !(resource->bind & (PIPE_BIND_SHARED | PIPE_BIND_DISPLAY_TARGET |
++                                PIPE_BIND_SCANOUT)) &&
++            !(bo->flags & PAN_BO_SHARED);
++         if (!(bo->flags & PAN_BO_SHARED) &&
++             !(candidate && mode == PIXEL2_SHADOW_INPLACE)) {
+             newbo =
+                panfrost_bo_create(dev, panfrost_bo_size(bo), flags, bo->label);
+          }
++         if (candidate)
++            pixel2_shadow_record(mode, resource->bind, panfrost_bo_size(bo),
++                                 newbo ? panfrost_bo_size(newbo) : 0, copy_resource);
+ 
+          if (newbo) {
+             if (copy_resource) {
+@@ -1338,6 +1838,7 @@
+             panfrost_bo_unreference(rsrc->bo);
+             rsrc->bo = newbo;
+             rsrc->image.data.base = newbo->ptr.gpu;
++            p2_account(rsrc,"shadow",false);
+ 
+             if (!copy_resource && drm_is_afbc(rsrc->image.layout.modifier))
+                panfrost_resource_init_afbc_headers(rsrc);
+@@ -1413,11 +1914,192 @@
+    }
+ }
+ 
++/* Single-level, unshared Mali-G31 RGBA8 with linear AFBC headers only.
++ * Retain the original header bits plus the locations and lengths of meaningful
++ * body bytes. The GPU can only sample the packed allocation. */
++struct p2_raw_tile {
++   uint32_t header[4], compact, bytes;
++};
++struct p2_raw_record {
++   struct pan_image_layout layout;
++   struct panfrost_bo *owner; /* Borrowed from the resource; never dereference. */
++   unsigned nr, bytes, non_solid;
++   struct p2_raw_tile tile[];
++};
++static unsigned
++p2_body_bytes(const uint32_t h[4])
++{
++   if (!(h[1] & 63))
++      return 0;
++   unsigned size = 0;
++   for (unsigned i = 0; i < 16; ++i) {
++      unsigned pos = i * 6, off = pos & 31, w = 1 + pos / 32;
++      uint32_t n = h[w] >> off;
++      if (off > 26) n |= h[w + 1] << (32 - off);
++      n &= 63;
++      size += n == 1 ? 64 : n; /* 4x4 RGBA8 uncompressed subblock */
++   }
++   return ALIGN_POT(size, 16);
++}
++static bool
++p2_fits(size_t offset, size_t count, size_t limit)
++{
++   return offset <= limit && count <= limit - offset;
++}
++static bool
++p2_raw_pack(struct panfrost_context *ctx, struct panfrost_resource *r,
++            struct panfrost_bo *dst, const struct pan_image_slice_layout *packed,
++            const struct pan_afbc_block_info *meta, unsigned compact_size,
++            uint64_t modifier)
++{
++   const struct pan_image_layout *layout = &r->image.layout;
++   const struct pan_image_slice_layout *s = &layout->slices[0];
++   unsigned nr = s->afbc.nr_blocks;
++   uint64_t original = DRM_FORMAT_MOD_ARM_AFBC(AFBC_FORMAT_MOD_BLOCK_SIZE_16x16 |
++                             AFBC_FORMAT_MOD_YTR | AFBC_FORMAT_MOD_SPARSE);
++   if (pan_device(r->base.screen)->arch != 7 || !p2_new_candidate(r) ||
++       r->p2_raw || layout->modifier != original || r->image.data.offset ||
++       layout->data_size > panfrost_bo_size(r->bo) || s->offset || packed->offset ||
++       s->size > layout->data_size || s->afbc.header_size > s->size ||
++       packed->afbc.header_size > compact_size || packed->size > compact_size ||
++       !nr || nr > 32768 || nr != packed->afbc.nr_blocks ||
++       s->afbc.stride != packed->afbc.stride ||
++       !p2_fits(0, (size_t)nr * 16, s->afbc.header_size) ||
++       !p2_fits(0, (size_t)nr * 16, packed->afbc.header_size))
++      return false;
++   size_t mapsize = sizeof(struct p2_raw_record) + nr * sizeof(struct p2_raw_tile);
++   if (100ull * (panfrost_bo_size(dst) + mapsize) > 75ull * panfrost_bo_size(r->bo))
++      return false;
++   if (!panfrost_bo_wait(r->bo, INT64_MAX, true))
++      return false;
++   panfrost_bo_mmap(r->bo); panfrost_bo_mmap(dst);
++   if (!r->bo->ptr.cpu || !dst->ptr.cpu) return false;
++   struct p2_raw_record *m = malloc(mapsize);
++   if (!m) return false;
++   m->layout = *layout; m->owner = dst; m->nr = nr; m->bytes = mapsize; m->non_solid = 0;
++   const uint8_t *src = r->bo->ptr.cpu;
++   uint8_t *out = dst->ptr.cpu;
++   unsigned offset = packed->afbc.header_size;
++   memset(out, 0, packed->afbc.header_size);
++   for (unsigned i = 0; i < nr; ++i) {
++      struct p2_raw_tile *t = &m->tile[i];
++      memcpy(t->header, src + i * 16, 16);
++      t->bytes = p2_body_bytes(t->header);
++      t->compact = offset;
++      unsigned old = t->header[0];
++      if (t->bytes != meta[i].size ||
++          meta[i].offset != offset - packed->afbc.header_size ||
++          !p2_fits(offset, t->bytes, packed->size) ||
++          (t->bytes && (old < s->afbc.header_size || (old & 15) ||
++                        !p2_fits(old, t->bytes, s->size)))) {
++         free(m); return false;
++      }
++      uint32_t h[4];
++      memcpy(h, t->header, 16);
++      if (old) h[0] = offset;
++      memcpy(out + i * 16, h, 16);
++      if (t->bytes) {
++         memcpy(out + offset, src + old, t->bytes);
++         ++m->non_solid;
++      }
++      offset += t->bytes;
++   }
++   if (offset != packed->size) { free(m); return false; }
++   /* Size shader was submitted before the wait; any older reader retains its
++    * own BO reference. All compact bytes were produced synchronously here. */
++   r->p2_raw = m;
++   struct panfrost_bo *old = r->bo;
++   r->bo = dst; r->image.data.base = dst->ptr.gpu;
++   r->image.layout.slices[0] = *packed;
++   r->image.layout.array_stride = compact_size;
++   r->image.layout.data_size = compact_size;
++   r->image.layout.modifier = modifier;
++   r->image.layout.crc = false; r->valid.crc = false;
++   panfrost_bo_unreference(old);
++   p2_account(r, "deferred_pack", false);
++   mesa_logi("P2AFBC raw-pack id=%" PRIu64 " blocks=%u non_solid=%u map=%u",
++             r->p2_id, nr, m->non_solid, m->bytes);
++   return true;
++}
++static bool
++p2_raw_restore(struct panfrost_resource *r)
++{
++   struct p2_raw_record *m = r->p2_raw;
++   if (!m) return true;
++   /* A full-resource rename has already discarded this representation. */
++   if (r->bo != m->owner ||
++       r->image.layout.modifier != (m->layout.modifier & ~AFBC_FORMAT_MOD_SPARSE)) {
++      free(m); r->p2_raw = NULL; return true;
++   }
++   if (!panfrost_bo_wait(r->bo, INT64_MAX, true)) return false;
++   struct panfrost_bo *sparse = panfrost_bo_create(pan_device(r->base.screen),
++                                        m->layout.data_size, 0, "AFBC restore");
++   if (!sparse || !sparse->ptr.cpu) {
++      if (sparse) panfrost_bo_unreference(sparse);
++      return false;
++   }
++   const struct pan_image_slice_layout *s = &m->layout.slices[0];
++   const struct pan_image_slice_layout *p = &r->image.layout.slices[0];
++   uint8_t *out = sparse->ptr.cpu;
++   const uint8_t *src = r->bo->ptr.cpu;
++   if (!src || s->size > panfrost_bo_size(sparse) || p->size > panfrost_bo_size(r->bo)) {
++      panfrost_bo_unreference(sparse); return false;
++   }
++   memset(out, 0, s->afbc.header_size);
++   for (unsigned i = 0; i < m->nr; ++i) {
++      const struct p2_raw_tile *t = &m->tile[i];
++      unsigned old = t->header[0];
++      uint32_t h[4];
++      memcpy(h, t->header, 16);
++      if (old) h[0] = t->compact;
++      if (memcmp(src + i * 16, h, 16) ||
++          !p2_fits(t->compact, t->bytes, p->size) ||
++          (t->bytes && !p2_fits(old, t->bytes, s->size))) {
++         panfrost_bo_unreference(sparse); return false;
++      }
++      memcpy(out + i * 16, t->header, 16);
++      if (t->bytes) memcpy(out + old, src + t->compact, t->bytes);
++   }
++   /* Existing batches can finish sampling their immutable compact BO. No
++    * draw, CSO binding, blitter state or current batch is touched here. */
++   struct panfrost_bo *compact = r->bo;
++   r->bo = sparse; r->image.data.base = sparse->ptr.gpu;
++   r->image.layout = m->layout; r->valid.crc = false;
++   r->p2_raw = NULL;
++   /* Restoring an object to make it writable is not a permanent exclusion.
++    * A short cooldown and a lifetime cap avoid repeatedly stalling on a hot
++    * ping-pong render target. */
++   if (pan_screen(r->base.screen)->p2_defer == 3 && r->p2_retries < 2) {
++      ++r->p2_retries;
++      r->p2_tried = false;
++      p_atomic_set(&r->p2_last_write,p2_ms());
++   }
++   p2_account(r, "raw_restore", false);
++   mesa_logi("P2AFBC raw-restore id=%" PRIu64 " blocks=%u non_solid=%u map=%u",
++             r->p2_id, m->nr, m->non_solid, m->bytes);
++   free(m); panfrost_bo_unreference(compact);
++   return true;
++}
++
+ void
+ pan_resource_modifier_convert(struct panfrost_context *ctx,
+                               struct panfrost_resource *rsrc, uint64_t modifier,
+                               bool copy_resource, const char *reason)
+ {
++   if (rsrc->p2_raw) {
++      if (!p2_raw_restore(rsrc)) {
++         /* A void Gallium conversion cannot return GL_OUT_OF_MEMORY. Never
++          * submit a write against a packed BO or recurse into a utility draw. */
++         if (!ctx->p2_lost) {
++            ctx->p2_lost = ctx->is_noop = true;
++            mesa_loge("P2AFBC restore failed; graphics context lost");
++            if (ctx->p2_reset.reset)
++               ctx->p2_reset.reset(ctx->p2_reset.data, PIPE_UNKNOWN_CONTEXT_RESET);
++         }
++         return;
++      }
++      if (rsrc->image.layout.modifier == modifier) return;
++   }
+    assert(!rsrc->modifier_constant);
+ 
+    struct pipe_resource *tmp_prsrc = panfrost_resource_create_with_modifier(
+@@ -1468,6 +2150,7 @@
+     * called with a specific modifier. We don't want that here, we want to
+     * be able to convert back to another modifier if needed */
+    rsrc->modifier_constant = false;
++   p2_account(rsrc,"modifier",false);
+    pipe_resource_reference(&tmp_prsrc, NULL);
+ }
+ 
+@@ -1576,7 +2259,7 @@
+    panfrost_flush_batches_accessing_rsrc(ctx, rsrc, "AFBC before size flush");
+    batch = panfrost_get_fresh_batch_for_fbo(ctx, "AFBC superblock sizes");
+    bo = panfrost_bo_create(dev, metadata_size, 0, "AFBC superblock sizes");
+-   assert(bo);
++   if (!bo) return NULL;
+ 
+    for (int level = first_level; level <= last_level; ++level) {
+       unsigned offset = out_offsets[level - first_level];
+@@ -1616,7 +2299,10 @@
+ 
+    metadata_bo = panfrost_get_afbc_superblock_sizes(ctx, prsrc, 0, last_level,
+                                                     metadata_offsets);
+-   panfrost_bo_wait(metadata_bo, INT64_MAX, false);
++   if (!metadata_bo) return;
++   if (!panfrost_bo_wait(metadata_bo, INT64_MAX, false)) {
++      panfrost_bo_unreference(metadata_bo); return;
++   }
+ 
+    for (unsigned level = 0; level <= last_level; ++level) {
+       struct pan_image_slice_layout *src_slice =
+@@ -1672,7 +2358,8 @@
+    unsigned old_size = panfrost_bo_size(prsrc->bo);
+    unsigned ratio = 100 * new_size / old_size;
+ 
+-   if (ratio > screen->max_afbc_packing_ratio) {
++   if (ratio > screen->max_afbc_packing_ratio || (ctx->p2_inside_pack &&
++       (100ull*new_size > 75ull*old_size || (uint64_t)new_size+(1u<<20)>old_size))) {
+       panfrost_bo_unreference(metadata_bo);
+       return;
+    }
+@@ -1681,7 +2368,21 @@
+ 
+    struct panfrost_bo *dst =
+       panfrost_bo_create(dev, new_size, 0, "AFBC compact texture");
+-   assert(dst);
++   if (!dst || (ctx->p2_inside_pack && (100ull*panfrost_bo_size(dst) > 75ull*old_size ||
++       (uint64_t)panfrost_bo_size(dst)+(1u<<20)>old_size))) {
++      if (dst) panfrost_bo_unreference(dst);
++      panfrost_bo_unreference(metadata_bo); return;
++   }
++   if (ctx->p2_inside_pack) {
++      const struct pan_afbc_block_info *meta =
++         metadata_bo->ptr.cpu + metadata_offsets[0];
++      if (!p2_raw_pack(ctx, prsrc, dst, &slice_infos[0], meta, new_size, dst_modifier)) {
++         mesa_logi("P2AFBC raw-reject id=%" PRIu64, prsrc->p2_id);
++         panfrost_bo_unreference(dst);
++      }
++      panfrost_bo_unreference(metadata_bo);
++      return;
++   }
+    struct panfrost_batch *batch =
+       panfrost_get_fresh_batch_for_fbo(ctx, "AFBC compaction");
+ 
+@@ -1702,6 +2403,7 @@
+    prsrc->image.data.base = dst->ptr.gpu;
+    prsrc->image.layout.crc = false;
+    prsrc->valid.crc = false;
++   p2_account(prsrc,ctx->p2_inside_pack ? "deferred_pack" : "pack",false);
+    panfrost_bo_unreference(metadata_bo);
+ }
+ 
+@@ -1717,8 +2419,10 @@
+       (struct panfrost_resource *)transfer->resource;
+    struct panfrost_device *dev = pan_device(pctx->screen);
+ 
+-   if (transfer->usage & PIPE_MAP_WRITE)
++   if (transfer->usage & PIPE_MAP_WRITE) {
++      if (prsrc->p2_can_defer) p2_note_write(prsrc);
+       prsrc->valid.crc = false;
++   }
+ 
+    /* AFBC/AFRC will use a staging resource. `initialized` will be set when
+     * the fragment job is created; this is deferred to prevent useless surface
+@@ -1737,6 +2441,7 @@
+             prsrc->bo = pan_resource(trans->staging.rsrc)->bo;
+             prsrc->image.data.base = prsrc->bo->ptr.gpu;
+             panfrost_bo_reference(prsrc->bo);
++            p2_account(prsrc,"staging",false);
+          } else {
+             bool discard = panfrost_can_discard(&prsrc->base, &transfer->box,
+                                                 transfer->usage);
+@@ -1778,6 +2483,7 @@
+                   assert(bo);
+                }
+ 
++               p2_account(prsrc,"linear",false);
+                util_copy_rect(
+                   bo->ptr.cpu + prsrc->image.layout.slices[0].offset,
+                   prsrc->base.format, prsrc->image.layout.slices[0].row_stride,
+@@ -1919,6 +2625,9 @@
+ void
+ panfrost_resource_screen_init(struct pipe_screen *pscreen)
+ {
++   pan_screen(pscreen)->p2_pool_mode = p2_pool_mode();
++   pan_screen(pscreen)->p2_defer = p2_defer_option();
++   list_inithead(&pan_screen(pscreen)->p2_recent_list);
+    pscreen->resource_create_with_modifiers =
+       panfrost_resource_create_with_modifiers;
+    pscreen->resource_create = u_transfer_helper_resource_create;
+@@ -1939,6 +2648,10 @@
+ void
+ panfrost_resource_context_init(struct pipe_context *pctx)
+ {
++   struct panfrost_context *ctx = pan_context(pctx);
++   p2_register_context(pan_screen(pctx->screen));
++   ctx->pixel2_shadow_mode = pixel2_shadow_mode();
++   pixel2_shadow_ready(ctx->pixel2_shadow_mode);
+    pctx->buffer_map = u_transfer_helper_transfer_map;
+    pctx->buffer_unmap = u_transfer_helper_transfer_unmap;
+    pctx->texture_map = u_transfer_helper_transfer_map;
+--- a/src/gallium/drivers/panfrost/pan_resource.h
++++ b/src/gallium/drivers/panfrost/pan_resource.h
+@@ -39,6 +39,13 @@
+ 
+ struct panfrost_resource {
+    struct pipe_resource base;
++   uint64_t p2_id, p2_layout, p2_capacity;
++   unsigned p2_mode, p2_kind;
++   bool p2_live, p2_import, p2_can_defer, p2_tried;
++   unsigned p2_retries;
++   uint32_t p2_last_write, p2_sampled, p2_last_sample, p2_listed;
++   struct list_head p2_recent_link;
++   struct p2_raw_record *p2_raw;
+    struct {
+       struct pipe_scissor_state extent;
+       struct {
+@@ -183,6 +190,10 @@
+    struct panfrost_context *ctx, struct panfrost_resource *rsrc,
+    unsigned first_level, unsigned last_level, unsigned *out_offsets);
+ 
++void p2_note_write(struct panfrost_resource *r);
++void p2_note_sample(struct panfrost_resource *r);
++void p2_deferred_flush(struct panfrost_context *ctx, unsigned flags);
++
+ bool panfrost_should_pack_afbc(struct panfrost_device *dev,
+                                const struct panfrost_resource *rsrc);
+ 
+--- a/src/gallium/drivers/panfrost/pan_screen.h
++++ b/src/gallium/drivers/panfrost/pan_screen.h
+@@ -111,6 +111,15 @@
+ 
+ struct panfrost_screen {
+    struct pipe_screen base;
++   unsigned p2_pool_mode, p2_contexts_ever;
++   unsigned p2_defer;
++   struct list_head p2_recent_list;
++   uint64_t p2_recent_walked, p2_expired, p2_unreferenced;
++   uint32_t p2_last_attempt, p2_last_stats;
++   uint32_t p2_last_outer;
++   uint64_t p2_burst_opportunities, p2_burst_multi, p2_burst_extra, p2_burst_budget_hits;
++   uint64_t p2_bound,p2_flushes,p2_attached,p2_recent,p2_invalid,p2_multi,p2_ineligible;
++   uint64_t p2_attempts,p2_success,p2_before,p2_after;
+    struct panfrost_device dev;
+    struct {
+       struct panfrost_pool bin;
+--- a/src/mesa/state_tracker/st_texture.c
++++ b/src/mesa/state_tracker/st_texture.c
+@@ -26,6 +26,8 @@
+  **************************************************************************/
+ 
+ #include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
+ 
+ #include "st_context.h"
+ #include "st_format.h"
+@@ -102,6 +104,20 @@
+    if (sparse)
+       pt.flags |= PIPE_RESOURCE_FLAG_SPARSE;
+ 
++   /* Pixel 2 stability experiment. Give the Panfrost context a legal
++    * top-level submission boundary before another large GL texture obtains
++    * its backing. Direct resource_create calls inside the driver never
++    * recurse here. Other processes and ordinary Mesa modes keep the default.
++    */
++   if (target == PIPE_TEXTURE_2D && format == PIPE_FORMAT_R8G8B8A8_UNORM &&
++       last_level == 0 && layers == 1 && nr_samples <= 1 &&
++       ((uint64_t)width0 * height0 >= (1u << 20)) &&
++       (bind & (PIPE_BIND_SAMPLER_VIEW | PIPE_BIND_RENDER_TARGET)) ==
++               (PIPE_BIND_SAMPLER_VIEW | PIPE_BIND_RENDER_TARGET)) {
++      const char *policy = getenv("PIXEL2_DEFER_AFBC");
++      if (policy && !strcmp(policy, "survival"))
++         st->pipe->flush(st->pipe, NULL, PIPE_FLUSH_HINT_FINISH);
++   }
+    newtex = screen->resource_create(screen, &pt);
+ 
+    assert(!newtex || pipe_is_referenced(&newtex->reference));

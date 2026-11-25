@@ -1,0 +1,5 @@
+# Appended to src/panfrost/meson.build in a private copy of Mesa 22.3.7.
+executable('pixel2-shader-compiler', 'pixel2_compile_shader.c',
+           c_args : ['-DPAN_ARCH=7'],
+           dependencies : [libpanfrost_dep, idep_mesautil],
+           build_by_default : false)

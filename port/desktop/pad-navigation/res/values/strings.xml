@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">Pixel 2 gamepad navigation</string>
+    <string name="service_description">Press R1 and the function key together, with R1 slightly first, to open navigation. Use the D-pad to choose, A to confirm or B to cancel.</string>
+    <string name="back">Back</string>
+    <string name="home">Home</string>
+    <string name="recents">Recent apps</string>
+    <string name="help">A  Select     B  Cancel</string>
+    <string name="action_unavailable">Navigation is currently unavailable</string>
+</resources>

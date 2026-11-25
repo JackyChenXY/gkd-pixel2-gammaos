@@ -1,0 +1,399 @@
+diff --git a/DrmHwcTwo.cpp b/DrmHwcTwo.cpp
+index 02667cf..8aad650 100644
+--- a/DrmHwcTwo.cpp
++++ b/DrmHwcTwo.cpp
+@@ -148,6 +148,10 @@ std::string DrmHwcTwo::HwcDisplay::Dump() {
+      << "Statistics since last dumpsys request:\n"
+      << DumpDelta(total_stats_.minus(prev_stats_)) << "\n\n";
+ 
++  std::ostringstream composition_stats;
++  compositor_.Dump(&composition_stats);
++  ss << composition_stats.str() << "\n";
++
+   memcpy(&prev_stats_, &total_stats_, sizeof(Stats));
+   return ss.str();
+ }
+@@ -692,8 +696,12 @@ HWC2::Error DrmHwcTwo::HwcDisplay::CreateComposition(bool test) {
+   if (test) {
+     ret = compositor_.TestComposition(composition.get());
+   } else {
+-    ret = compositor_.ApplyComposition(std::move(composition));
+-    AddFenceToPresentFence(compositor_.TakeOutFence());
++    UniqueFd present_fence;
++    const bool client_only = use_client_layer && z_map.size() == 1;
++    ret = compositor_.ApplyComposition(std::move(composition), &present_fence,
++                                       client_only);
++    if (ret == 0)
++      AddFenceToPresentFence(std::move(present_fence));
+   }
+   if (ret) {
+     if (!test)
+diff --git a/compositor/DrmDisplayCompositor.cpp b/compositor/DrmDisplayCompositor.cpp
+index a1fe50f..8843c94 100644
+--- a/compositor/DrmDisplayCompositor.cpp
++++ b/compositor/DrmDisplayCompositor.cpp
+@@ -20,6 +20,7 @@
+ #include "DrmDisplayCompositor.h"
+ 
+ #include <drm/drm_mode.h>
++#include <fcntl.h>
+ #include <pthread.h>
+ #include <sched.h>
+ #include <sync/sync.h>
+@@ -36,6 +37,7 @@
+ #include "drm/DrmPlane.h"
+ #include "utils/autolock.h"
+ #include "utils/log.h"
++#include "utils/properties.h"
+ 
+ namespace android {
+ 
+@@ -87,6 +89,11 @@ DrmDisplayCompositor::~DrmDisplayCompositor() {
+   int ret = pthread_mutex_lock(&lock_);
+   if (ret)
+     ALOGE("Failed to acquire compositor lock %d", ret);
++  if (pending_composition_ && WaitForPendingFrame() != 0) {
++    // Teardown still has both compositions. Give the blocking disable a
++    // chance to finish scanout before releasing their userspace references.
++    DisablePlanes(pending_composition_.get());
++  }
+   DrmDevice *drm = resource_manager_->GetDrmDevice(display_);
+   if (mode_.blob_id)
+     drm->DestroyPropertyBlob(mode_.blob_id);
+@@ -199,8 +206,10 @@ int DrmDisplayCompositor::DisablePlanes(DrmDisplayComposition *display_comp) {
+ }
+ 
+ int DrmDisplayCompositor::CommitFrame(DrmDisplayComposition *display_comp,
+-                                      bool test_only) {
+-  ATRACE_CALL();
++                                      bool test_only, bool *nonblocking) {
++  const bool try_nonblock = !test_only && nonblocking && *nonblocking;
++  ATRACE_NAME(test_only ? "DRM test commit" :
++              try_nonblock ? "DRM nonblocking commit" : "DRM blocking commit");
+ 
+   int ret = 0;
+ 
+@@ -208,7 +217,7 @@ int DrmDisplayCompositor::CommitFrame(DrmDisplayComposition *display_comp,
+   std::vector<DrmCompositionPlane> &comp_planes = display_comp
+                                                       ->composition_planes();
+   DrmDevice *drm = resource_manager_->GetDrmDevice(display_);
+-  uint64_t out_fences[drm->crtcs().size()];
++  int out_fence_fd = -1;
+ 
+   DrmConnector *connector = drm->GetConnectorForDisplay(display_);
+   if (!connector) {
+@@ -227,10 +236,10 @@ int DrmDisplayCompositor::CommitFrame(DrmDisplayComposition *display_comp,
+     return -ENOMEM;
+   }
+ 
+-  if (crtc->out_fence_ptr_property().id() != 0) {
++  if (!test_only && crtc->out_fence_ptr_property().id() != 0) {
+     ret = drmModeAtomicAddProperty(pset, crtc->id(),
+                                    crtc->out_fence_ptr_property().id(),
+-                                   (uint64_t)&out_fences[crtc->pipe()]);
++                                   (uint64_t)&out_fence_fd);
+     if (ret < 0) {
+       ALOGE("Failed to add OUT_FENCE_PTR property to pset: %d", ret);
+       drmModeAtomicFree(pset);
+@@ -506,8 +515,27 @@ int DrmDisplayCompositor::CommitFrame(DrmDisplayComposition *display_comp,
+     uint32_t flags = DRM_MODE_ATOMIC_ALLOW_MODESET;
+     if (test_only)
+       flags |= DRM_MODE_ATOMIC_TEST_ONLY;
++    else if (try_nonblock)
++      flags |= DRM_MODE_ATOMIC_NONBLOCK;
+ 
++    errno = 0;
+     ret = drmModeAtomicCommit(drm->fd(), pset, flags, drm);
++    const int error = ret == -1 && errno != 0 ? errno : -ret;
++    if (try_nonblock && ret != 0 && out_fence_fd < 0 &&
++        (error == EBUSY || error == EINVAL || error == EOPNOTSUPP)) {
++      // The ioctl rejected the atomic state, so the same request can be
++      // submitted synchronously. A successful ioctl is never retried.
++      ATRACE_NAME("DRM synchronous fallback");
++      *nonblocking = false;
++      if (error != EBUSY) {
++        ALOGW("Display %d: disabling nonblocking commits after error %d",
++              display_, error);
++        nonblock_supported_ = false;
++      }
++      ++dump_nonblocking_fallbacks_;
++      ret = drmModeAtomicCommit(drm->fd(), pset,
++                                flags & ~DRM_MODE_ATOMIC_NONBLOCK, drm);
++    }
+     if (ret) {
+       if (!test_only)
+         ALOGE("Failed to commit pset ret=%d\n", ret);
+@@ -518,6 +546,10 @@ int DrmDisplayCompositor::CommitFrame(DrmDisplayComposition *display_comp,
+   if (pset)
+     drmModeAtomicFree(pset);
+ 
++  UniqueFd out_fence(out_fence_fd);
++  if (ret)
++    return ret;
++
+   if (!test_only && mode_.needs_modeset) {
+     ret = drm->DestroyPropertyBlob(mode_.old_blob_id);
+     if (ret) {
+@@ -539,9 +571,8 @@ int DrmDisplayCompositor::CommitFrame(DrmDisplayComposition *display_comp,
+     mode_.needs_modeset = false;
+   }
+ 
+-  if (crtc->out_fence_ptr_property().id()) {
+-    display_comp->out_fence_ = UniqueFd((int)out_fences[crtc->pipe()]);
+-  }
++  if (!test_only)
++    display_comp->out_fence_ = std::move(out_fence);
+ 
+   return ret;
+ }
+@@ -581,37 +612,85 @@ std::tuple<int, uint32_t> DrmDisplayCompositor::CreateModeBlob(
+   return std::make_tuple(ret, id);
+ }
+ 
+-void DrmDisplayCompositor::ClearDisplay() {
+-  if (!active_composition_)
+-    return;
++int DrmDisplayCompositor::WaitForPendingFrame() {
++  if (!pending_composition_)
++    return 0;
+ 
+-  if (DisablePlanes(active_composition_.get()))
++  ATRACE_NAME("Wait for pending DRM flip");
++  const auto &fence = pending_composition_->out_fence_;
++  if (!fence)
++    return -EIO;
++  if (sync_wait(fence.Get(), kAcquireWaitTimeoutMs * kAcquireWaitTries) != 0) {
++    const int error = errno;
++    ALOGE("Display %d: pending DRM flip wait failed: %d", display_, error);
++    return -error;
++  }
++
++  active_composition_ = std::move(pending_composition_);
++  return 0;
++}
++
++void DrmDisplayCompositor::ClearDisplayLocked() {
++  ready_for_nonblock_ = false;
++  if (WaitForPendingFrame() != 0 || !active_composition_)
+     return;
+ 
+-  active_composition_.reset(nullptr);
++  if (DisablePlanes(active_composition_.get()) == 0)
++    active_composition_.reset();
+ }
+ 
+-void DrmDisplayCompositor::ApplyFrame(
+-    std::unique_ptr<DrmDisplayComposition> composition, int status) {
++void DrmDisplayCompositor::ClearDisplay() {
+   AutoLock lock(&lock_, __func__);
+-  if (lock.Lock())
+-    return;
+-  int ret = status;
++  if (lock.Lock() == 0)
++    ClearDisplayLocked();
++}
+ 
+-  if (!ret) {
+-    ret = CommitFrame(composition.get(), false);
+-  }
++int DrmDisplayCompositor::ApplyFrame(
++    std::unique_ptr<DrmDisplayComposition> composition, UniqueFd *present_fence,
++    bool client_only) {
++  char property[PROPERTY_VALUE_MAX];
++  property_get("vendor.hwc.drm.nonblock_client_present", property, "0");
++  DrmDevice *drm = resource_manager_->GetDrmDevice(display_);
++  DrmCrtc *crtc = drm->GetCrtcForDisplay(display_);
++  bool nonblocking = property[0] == '1' && property[1] == '\0' &&
++                     nonblock_supported_ && active_ && ready_for_nonblock_ &&
++                     client_only && present_fence && !mode_.needs_modeset &&
++                     crtc && crtc->out_fence_ptr_property().id() != 0;
+ 
++  const int ret = CommitFrame(composition.get(), false, &nonblocking);
+   if (ret) {
+     ALOGE("Composite failed for display %d", display_);
+-    // Disable the hw used by the last active composition. This allows us to
+-    // signal the release fences from that composition to avoid hanging.
+-    ClearDisplay();
+-    return;
++    ClearDisplayLocked();
++    return ret;
++  }
++
++  if (nonblocking) {
++    pending_composition_ = std::move(composition);
++    const auto &fence = pending_composition_->out_fence_;
++    if (!fence) {
++      ALOGE("Accepted nonblocking frame on display %d without a fence", display_);
++      return -EIO;
++    }
++    const int dup_fd = fcntl(fence.Get(), F_DUPFD_CLOEXEC, 0);
++    if (dup_fd >= 0) {
++      *present_fence = UniqueFd(dup_fd);
++    } else {
++      // Keep both references and wait when we cannot hand SurfaceFlinger a
++      // duplicate. Advancing without a fence would permit premature reuse.
++      const int wait_result = WaitForPendingFrame();
++      if (wait_result != 0)
++        return wait_result;
++      *present_fence = std::move(active_composition_->out_fence_);
++    }
++    ++dump_nonblocking_frames_;
++  } else {
++    active_composition_ = std::move(composition);
++    if (present_fence)
++      *present_fence = std::move(active_composition_->out_fence_);
+   }
+-  ++dump_frames_composited_;
+ 
+-  active_composition_.swap(composition);
++  ready_for_nonblock_ = true;
++  ++dump_frames_composited_;
+ 
+   flatten_countdown_ = FLATTEN_COUNTDOWN_INIT;
+   if (flattening_state_ != FlatteningState::kClientRequested) {
+@@ -620,11 +699,19 @@ void DrmDisplayCompositor::ApplyFrame(
+     SetFlattening(FlatteningState::kClientDone);
+   }
+   vsync_worker_.VSyncControl(true);
++  return 0;
+ }
+ 
+ int DrmDisplayCompositor::ApplyComposition(
+-    std::unique_ptr<DrmDisplayComposition> composition) {
+-  int ret = 0;
++    std::unique_ptr<DrmDisplayComposition> composition, UniqueFd *present_fence,
++    bool client_only) {
++  AutoLock lock(&lock_, __func__);
++  int ret = lock.Lock();
++  if (ret != 0)
++    return ret;
++  ret = WaitForPendingFrame();
++  if (ret != 0)
++    return ret;
+   switch (composition->type()) {
+     case DRM_COMPOSITION_TYPE_FRAME:
+       if (composition->geometry_changed()) {
+@@ -637,15 +724,18 @@ int DrmDisplayCompositor::ApplyComposition(
+         }
+       }
+ 
+-      ApplyFrame(std::move(composition), ret);
+-      break;
++      return ApplyFrame(std::move(composition), present_fence, client_only);
+     case DRM_COMPOSITION_TYPE_DPMS:
+-      active_ = (composition->dpms_mode() == DRM_MODE_DPMS_ON);
++      ready_for_nonblock_ = false;
+       ret = ApplyDpms(composition.get());
+-      if (ret)
++      if (ret) {
+         ALOGE("Failed to apply dpms for display %d", display_);
++      } else {
++        active_ = composition->dpms_mode() == DRM_MODE_DPMS_ON;
++      }
+       return ret;
+     case DRM_COMPOSITION_TYPE_MODESET:
++      ready_for_nonblock_ = false;
+       mode_.mode = composition->display_mode();
+       if (mode_.blob_id)
+         resource_manager_->GetDrmDevice(display_)->DestroyPropertyBlob(
+@@ -666,7 +756,9 @@ int DrmDisplayCompositor::ApplyComposition(
+ }
+ 
+ int DrmDisplayCompositor::TestComposition(DrmDisplayComposition *composition) {
+-  return CommitFrame(composition, true);
++  AutoLock lock(&lock_, __func__);
++  const int ret = lock.Lock();
++  return ret == 0 ? CommitFrame(composition, true) : ret;
+ }
+ 
+ void DrmDisplayCompositor::SetFlattening(FlatteningState new_state) {
+@@ -685,7 +777,9 @@ void DrmDisplayCompositor::SetFlattening(FlatteningState new_state) {
+ }
+ 
+ bool DrmDisplayCompositor::IsFlatteningNeeded() const {
+-  return CountdownExpired() && active_composition_->layers().size() >= 2;
++  const auto &composition = pending_composition_ ? pending_composition_ :
++                                                   active_composition_;
++  return CountdownExpired() && composition && composition->layers().size() >= 2;
+ }
+ 
+ int DrmDisplayCompositor::FlattenOnClient() {
+@@ -758,8 +852,11 @@ void DrmDisplayCompositor::Dump(std::ostringstream *out) const {
+ 
+   *out << "--DrmDisplayCompositor[" << display_
+        << "]: num_frames=" << num_frames << " num_ms=" << num_ms
+-       << " fps=" << fps << "\n";
++       << " fps=" << fps << " nonblocking_frames=" << dump_nonblocking_frames_
++       << " nonblocking_fallbacks=" << dump_nonblocking_fallbacks_ << "\n";
+ 
++  dump_nonblocking_frames_ = 0;
++  dump_nonblocking_fallbacks_ = 0;
+   dump_last_timestamp_ns_ = cur_ts;
+ 
+   pthread_mutex_unlock(&lock_);
+diff --git a/compositor/DrmDisplayCompositor.h b/compositor/DrmDisplayCompositor.h
+index c0eed0c..3d41fc3 100644
+--- a/compositor/DrmDisplayCompositor.h
++++ b/compositor/DrmDisplayCompositor.h
+@@ -66,18 +66,14 @@ class DrmDisplayCompositor {
+   }
+ 
+   std::unique_ptr<DrmDisplayComposition> CreateInitializedComposition() const;
+-  int ApplyComposition(std::unique_ptr<DrmDisplayComposition> composition);
++  int ApplyComposition(std::unique_ptr<DrmDisplayComposition> composition,
++                       UniqueFd *present_fence = nullptr,
++                       bool client_only = false);
+   int TestComposition(DrmDisplayComposition *composition);
+   int Composite();
+   void Dump(std::ostringstream *out) const;
+   void Vsync(int display, int64_t timestamp);
+   void ClearDisplay();
+-  UniqueFd TakeOutFence() {
+-    if (!active_composition_) {
+-      return UniqueFd();
+-    }
+-    return std::move(active_composition_->out_fence_);
+-  }
+ 
+   FlatteningState GetFlatteningState() const;
+   uint32_t GetFlattenedFramesCount() const;
+@@ -100,12 +96,15 @@ class DrmDisplayCompositor {
+   static const int kAcquireWaitTries = 5;
+   static const int kAcquireWaitTimeoutMs = 100;
+ 
+-  int CommitFrame(DrmDisplayComposition *display_comp, bool test_only);
++  int CommitFrame(DrmDisplayComposition *display_comp, bool test_only,
++                  bool *nonblocking = nullptr);
++  int WaitForPendingFrame();
++  void ClearDisplayLocked();
+   int ApplyDpms(DrmDisplayComposition *display_comp);
+   int DisablePlanes(DrmDisplayComposition *display_comp);
+ 
+-  void ApplyFrame(std::unique_ptr<DrmDisplayComposition> composition,
+-                  int status);
++  int ApplyFrame(std::unique_ptr<DrmDisplayComposition> composition,
++                 UniqueFd *present_fence, bool client_only);
+ 
+   void SetFlattening(FlatteningState new_state);
+   bool IsFlatteningNeeded() const;
+@@ -120,6 +119,11 @@ class DrmDisplayCompositor {
+   int display_;
+ 
+   std::unique_ptr<DrmDisplayComposition> active_composition_;
++  // Keep both framebuffers alive until the kernel signals that the pending
++  // frame has replaced the active one.
++  std::unique_ptr<DrmDisplayComposition> pending_composition_;
++  bool ready_for_nonblock_ = false;
++  bool nonblock_supported_ = true;
+ 
+   bool initialized_;
+   bool active_;
+@@ -133,6 +137,8 @@ class DrmDisplayCompositor {
+   // State tracking progress since our last Dump(). These are mutable since
+   // we need to reset them on every Dump() call.
+   mutable uint64_t dump_frames_composited_;
++  mutable uint64_t dump_nonblocking_frames_ = 0;
++  mutable uint64_t dump_nonblocking_fallbacks_ = 0;
+   mutable uint64_t dump_last_timestamp_ns_;
+   VSyncWorker vsync_worker_;
+   int64_t flatten_countdown_;

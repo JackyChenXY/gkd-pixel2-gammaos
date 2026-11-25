@@ -1,0 +1,295 @@
+--- a/packages/apps/Trebuchet/quickstep/src/com/android/launcher3/BaseQuickstepLauncher.java
++++ b/packages/apps/Trebuchet/quickstep/src/com/android/launcher3/BaseQuickstepLauncher.java
+@@ -40,6 +40,8 @@
+ import android.os.Bundle;
+ import android.os.CancellationSignal;
+ import android.os.IBinder;
++import android.view.InputDevice;
++import android.view.KeyEvent;
+ import android.view.View;
+ import android.view.WindowInsets;
+ import android.window.SplashScreen;
+@@ -121,6 +123,108 @@
+     private @Nullable UnfoldTransitionProgressProvider mUnfoldTransitionProgressProvider;
+     private @Nullable LauncherUnfoldAnimationController mLauncherUnfoldAnimationController;
+ 
++    private android.app.AlertDialog mPadNavigation;
++    private int mPadNavigationIndex;
++    private int mPadConfirmKey = KeyEvent.KEYCODE_UNKNOWN;
++
++    private static boolean isPixelPad(KeyEvent event) {
++        InputDevice pad = event.getDevice();
++        return pad != null && "gkd_pixel2_joypad".equals(pad.getName()) && pad.getVendorId() == 1
++                && (pad.getProductId() == 1 || pad.getProductId() == 0x2102);
++    }
++
++    @Override
++    public boolean dispatchKeyEvent(KeyEvent event) {
++        if (isPixelPad(event)) {
++            if (mPadNavigation != null && routePadNavigation(event)) return true;
++            boolean inOverview = isInState(LauncherState.OVERVIEW);
++            if ((inOverview || isInState(NORMAL)) && AbstractFloatingView.getTopOpenView(this) == null) {
++                if (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_Y) {
++                    if (event.getAction() == KeyEvent.ACTION_UP && !event.isCanceled()) showPadNavigation();
++                    return true;
++                }
++                RecentsView overview = getOverviewPanel();
++                if (inOverview && overview != null && overview.handlePixelPadKey(event)) return true;
++            }
++        }
++        return super.dispatchKeyEvent(event);
++    }
++
++    private void showPadNavigation() {
++        mPadNavigationIndex = 1;
++        mPadConfirmKey = KeyEvent.KEYCODE_UNKNOWN;
++        android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this)
++                .setSingleChoiceItems(R.array.pixel2_pad_navigation, mPadNavigationIndex,
++                        (d, index) -> runPadNavigation(index))
++                .create();
++        mPadNavigation = dialog;
++        dialog.setOnKeyListener((d, key, event) -> isPixelPad(event) && routePadNavigation(event));
++        dialog.setOnDismissListener(d -> {
++            mPadNavigation = null;
++            mPadConfirmKey = KeyEvent.KEYCODE_UNKNOWN;
++        });
++        dialog.show();
++        android.view.Window window = dialog.getWindow();
++        window.setGravity(android.view.Gravity.END | android.view.Gravity.CENTER_VERTICAL);
++        int width = Math.round(240 * getResources().getDisplayMetrics().density);
++        window.setLayout(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
++    }
++
++    private boolean routePadNavigation(KeyEvent event) {
++        int key = event.getKeyCode();
++        boolean down = event.getAction() == KeyEvent.ACTION_DOWN;
++        switch (key) {
++            case KeyEvent.KEYCODE_DPAD_UP:
++            case KeyEvent.KEYCODE_DPAD_LEFT:
++            case KeyEvent.KEYCODE_DPAD_DOWN:
++            case KeyEvent.KEYCODE_DPAD_RIGHT:
++                if (down) {
++                    int delta = key == KeyEvent.KEYCODE_DPAD_UP || key == KeyEvent.KEYCODE_DPAD_LEFT ? -1 : 1;
++                    mPadNavigationIndex = (mPadNavigationIndex + delta + 3) % 3;
++                    mPadNavigation.getListView().setItemChecked(mPadNavigationIndex, true);
++                    mPadNavigation.getListView().setSelection(mPadNavigationIndex);
++                }
++                return true;
++            case KeyEvent.KEYCODE_DPAD_CENTER:
++            case KeyEvent.KEYCODE_BUTTON_A:
++            case KeyEvent.KEYCODE_BUTTON_B:
++            case KeyEvent.KEYCODE_BUTTON_Y:
++                if (down && event.getRepeatCount() == 0) mPadConfirmKey = key;
++                if (event.getAction() == KeyEvent.ACTION_UP && mPadConfirmKey == key) {
++                    mPadConfirmKey = KeyEvent.KEYCODE_UNKNOWN;
++                    if (!event.isCanceled()) {
++                        if (key == KeyEvent.KEYCODE_BUTTON_B || key == KeyEvent.KEYCODE_BUTTON_Y) {
++                            mPadNavigation.dismiss();
++                        } else {
++                            runPadNavigation(mPadNavigationIndex);
++                        }
++                    }
++                }
++                return true;
++            default:
++                return false;
++        }
++    }
++
++    private void runPadNavigation(int index) {
++        mPadNavigation.dismiss();
++        if (index == 0) {
++            onBackPressed();
++        } else if (index == 1) {
++            RecentsView overview = getOverviewPanel();
++            if (isInState(LauncherState.OVERVIEW) && overview != null) overview.startHome();
++            else getStateManager().goToState(NORMAL);
++        } else if (mOverviewCommandHelper != null && !isInState(LauncherState.OVERVIEW)) {
++            mOverviewCommandHelper.addCommand(OverviewCommandHelper.TYPE_SHOW);
++        }
++    }
++
++    @Override
++    protected void onStop() {
++        if (mPadNavigation != null) mPadNavigation.dismiss();
++        super.onStop();
++    }
++
+     @Override
+     protected void onCreate(Bundle savedInstanceState) {
+         super.onCreate(savedInstanceState);
+--- a/packages/apps/Trebuchet/quickstep/src/com/android/quickstep/views/RecentsView.java
++++ b/packages/apps/Trebuchet/quickstep/src/com/android/quickstep/views/RecentsView.java
+@@ -562,6 +562,14 @@
+     private boolean mRunningTaskShowScreenshot = false;
+ 
+     private boolean mOverviewStateEnabled;
++    private final android.graphics.drawable.GradientDrawable mPadOutline =
++            new android.graphics.drawable.GradientDrawable();
++    private View mPadOutlinedView;
++    private int mPadBarAction = View.NO_ID;
++    private int mPadPressedAction = View.NO_ID;
++    private int mPadActionKey = KeyEvent.KEYCODE_UNKNOWN;
++    private int mPadActionTaskId = -1;
++
+     private boolean mHandleTaskStackChanges;
+     private boolean mSwipeDownShouldLaunchApp;
+     private boolean mTouchDownToStartHome;
+@@ -1146,6 +1154,11 @@
+ 
+     public void setOverviewStateEnabled(boolean enabled) {
+         mOverviewStateEnabled = enabled;
++        mPadBarAction = View.NO_ID;
++        mPadPressedAction = View.NO_ID;
++        mPadActionKey = KeyEvent.KEYCODE_UNKNOWN;
++        mPadActionTaskId = -1;
++        updatePadOutline();
+         updateTaskStackListenerState();
+         mOrientationState.setRotationWatcherEnabled(enabled);
+         if (!enabled) {
+@@ -1177,6 +1190,7 @@
+     @Override
+     protected void onPageEndTransition() {
+         super.onPageEndTransition();
++        updatePadOutline();
+         if (isClearAllHidden()) {
+             mActionsView.updateDisabledFlags(OverviewActionsView.DISABLED_SCROLLING, false);
+         }
+@@ -3441,6 +3455,105 @@
+         }
+     }
+ 
++    private View getPadBarAction(int id) {
++        if (mActionsView == null || id == View.NO_ID || getTaskViewCount() == 0) return null;
++        View action = mActionsView.findViewById(id);
++        return action != null && action.isShown() && action.isEnabled() ? action : null;
++    }
++
++    private void updatePadOutline() {
++        View target = mOverviewStateEnabled ? getPadBarAction(mPadBarAction) : null;
++        if (target == null && mOverviewStateEnabled) {
++            TaskView task = getNextPageTaskView();
++            target = task == null ? null : task.getThumbnail();
++        }
++        if (mPadOutlinedView != target) {
++            if (mPadOutlinedView != null) mPadOutlinedView.getOverlay().remove(mPadOutline);
++            mPadOutlinedView = target;
++            if (target != null) {
++                float density = getResources().getDisplayMetrics().density;
++                mPadOutline.setColor(android.graphics.Color.TRANSPARENT);
++                mPadOutline.setCornerRadius(12 * density);
++                mPadOutline.setStroke(Math.max(2, Math.round(3 * density)), 0xff79e4fa);
++                target.getOverlay().add(mPadOutline);
++            }
++        }
++        if (target != null) mPadOutline.setBounds(0, 0, target.getWidth(), target.getHeight());
++    }
++
++    /** Routes the handheld controls while the task carousel is active. */
++    public boolean handlePixelPadKey(KeyEvent event) {
++        int key = event.getKeyCode();
++        boolean down = event.getAction() == KeyEvent.ACTION_DOWN;
++        switch (key) {
++            case KeyEvent.KEYCODE_DPAD_UP:
++            case KeyEvent.KEYCODE_DPAD_DOWN:
++                if (down) {
++                    if (key == KeyEvent.KEYCODE_DPAD_UP) mPadBarAction = View.NO_ID;
++                    else if (mPadBarAction == View.NO_ID && getPadBarAction(R.id.action_screenshot) != null) {
++                        mPadBarAction = R.id.action_screenshot;
++                    }
++                    updatePadOutline();
++                }
++                return true;
++            case KeyEvent.KEYCODE_DPAD_LEFT:
++            case KeyEvent.KEYCODE_DPAD_RIGHT:
++                if (down && mPadBarAction != View.NO_ID) {
++                    int id = ((key == KeyEvent.KEYCODE_DPAD_RIGHT) !=
++                            (mActionsView.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL))
++                            ? R.id.action_clear_all : R.id.action_screenshot;
++                    if (getPadBarAction(id) != null) mPadBarAction = id;
++                    updatePadOutline();
++                } else if (down && mPendingAnimation == null) {
++                    int step = (key == KeyEvent.KEYCODE_DPAD_RIGHT) != mIsRtl ? 1 : -1;
++                    snapToPageRelative(getTaskViewCount(), step, false);
++                    updatePadOutline();
++                }
++                return true;
++            case KeyEvent.KEYCODE_DPAD_CENTER:
++            case KeyEvent.KEYCODE_BUTTON_A:
++            case KeyEvent.KEYCODE_BUTTON_B:
++            case KeyEvent.KEYCODE_BUTTON_X:
++                break;
++            default:
++                return false;
++        }
++        TaskView card = getNextPageTaskView();
++        int taskId = card == null ? -1 : card.getTaskIds()[0];
++        if (down) {
++            if (event.getRepeatCount() == 0) {
++                mPadActionKey = key;
++                mPadActionTaskId = taskId;
++                mPadPressedAction = mPadBarAction;
++            }
++        } else if (event.getAction() == KeyEvent.ACTION_UP && mPadActionKey == key) {
++            mPadActionKey = KeyEvent.KEYCODE_UNKNOWN;
++            if (!event.isCanceled()) {
++                if (key == KeyEvent.KEYCODE_BUTTON_B) {
++                    if (mPadBarAction == View.NO_ID) startHome();
++                    else {
++                        mPadBarAction = View.NO_ID;
++                        updatePadOutline();
++                    }
++                } else if (mPadPressedAction != mPadBarAction) {
++                    return true;
++                } else if (mPadBarAction != View.NO_ID) {
++                    View action = getPadBarAction(mPadBarAction);
++                    if (key != KeyEvent.KEYCODE_BUTTON_X && action != null && mPendingAnimation == null
++                            && taskId == mPadActionTaskId) action.performClick();
++                } else if (taskId != -1 && taskId == mPadActionTaskId && mPendingAnimation == null) {
++                    if (key == KeyEvent.KEYCODE_BUTTON_X) {
++                        dismissTask(card, true, true);
++                    } else {
++                        card.launchTaskAnimated();
++                    }
++                }
++            }
++            mPadActionTaskId = -1;
++        }
++        return true;
++    }
++
+     @Override
+     public boolean dispatchKeyEvent(KeyEvent event) {
+         if (event.getAction() == KeyEvent.ACTION_DOWN) {
+@@ -3639,6 +3752,7 @@
+         mShowAsGridLastOnLayout = showAsGrid();
+ 
+         super.onLayout(changed, left, top, right, bottom);
++        updatePadOutline();
+ 
+         updateEmptyStateUi(changed);
+ 
+--- a/packages/apps/Trebuchet/res/values/strings.xml
++++ b/packages/apps/Trebuchet/res/values/strings.xml
+@@ -426,4 +426,9 @@
+ 
+     <!-- Failed action error message: e.g. Failed: Pause -->
+     <string name="remote_action_failed">Failed: <xliff:g id="what" example="Pause">%1$s</xliff:g></string>
++    <string-array name="pixel2_pad_navigation">
++        <item>Back</item>
++        <item>Home</item>
++        <item>Recent apps</item>
++    </string-array>
+ </resources>
+--- a/packages/apps/Trebuchet/res/values-zh-rCN/strings.xml
++++ b/packages/apps/Trebuchet/res/values-zh-rCN/strings.xml
+@@ -167,4 +167,9 @@
+     <string name="work_apps_enable_btn_text" msgid="1156432622148413741">"开启工作应用"</string>
+     <string name="developer_options_filter_hint" msgid="5896817443635989056">"过滤器"</string>
+     <string name="remote_action_failed" msgid="1383965239183576790">"失败：<xliff:g id="WHAT">%1$s</xliff:g>"</string>
++    <string-array name="pixel2_pad_navigation">
++        <item>返回</item>
++        <item>桌面</item>
++        <item>最近任务</item>
++    </string-array>
+ </resources>

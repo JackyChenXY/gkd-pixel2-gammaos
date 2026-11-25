@@ -1,0 +1,87 @@
+--- a/src/egl/drivers/dri2/platform_android.c
++++ b/src/egl/drivers/dri2/platform_android.c
+@@ -462,6 +462,13 @@
+    return img;
+ }
+ 
++static bool
++droid_uses_native_input_fences(const struct dri2_egl_display *dri2_dpy)
++{
++   return dri2_dpy->image->base.version >= 21 &&
++          dri2_dpy->image->setInFenceFd != NULL;
++}
++
+ static void
+ handle_in_fence_fd(struct dri2_egl_surface *dri2_surf, __DRIimage *img)
+ {
+@@ -473,8 +480,7 @@
+ 
+    validate_fence_fd(dri2_surf->in_fence_fd);
+ 
+-   if (dri2_dpy->image->base.version >= 21 &&
+-       dri2_dpy->image->setInFenceFd != NULL) {
++   if (droid_uses_native_input_fences(dri2_dpy)) {
+       dri2_dpy->image->setInFenceFd(img, dri2_surf->in_fence_fd);
+    } else {
+       sync_wait(dri2_surf->in_fence_fd, -1);
+@@ -535,6 +541,39 @@
+    return EGL_TRUE;
+ }
+ 
++static int
++droid_take_window_buffer_fence(struct dri2_egl_surface *dri2_surf)
++{
++   _EGLDisplay *disp = dri2_surf->base.Resource.Display;
++   struct dri2_egl_display *dri2_dpy = dri2_egl_display(disp);
++   int out = dri2_surf->out_fence_fd;
++   int in = dri2_surf->in_fence_fd;
++
++   dri2_surf->out_fence_fd = -1;
++   if (in < 0 || !droid_uses_native_input_fences(dri2_dpy))
++      return out;
++
++   /* A buffer-age query can dequeue a buffer without creating a DRI image.
++    * Queueing or cancelling that buffer replaces its slot fence. Preserve
++    * the original release fence even if there was no rendering that used it.
++    */
++   dri2_surf->in_fence_fd = -1;
++   if (out < 0 || in == out)
++      return in;
++
++   int merged = sync_merge("droid-window", out, in);
++   if (merged < 0) {
++      /* Keep the rendering fence and drain the input dependency locally. */
++      sync_wait(in, -1);
++      close(in);
++      return out;
++   }
++
++   close(in);
++   close(out);
++   return merged;
++}
++
+ static EGLBoolean
+ droid_window_enqueue_buffer(_EGLDisplay *disp, struct dri2_egl_surface *dri2_surf)
+ {
+@@ -550,8 +589,7 @@
+     * consumer is responsible for closing it. Caller must not use the fd
+     * after passing it to queueBuffer.
+     */
+-   int fence_fd = dri2_surf->out_fence_fd;
+-   dri2_surf->out_fence_fd = -1;
++   int fence_fd = droid_take_window_buffer_fence(dri2_surf);
+    ANativeWindow_queueBuffer(dri2_surf->window, dri2_surf->buffer, fence_fd);
+ 
+    dri2_surf->buffer = NULL;
+@@ -569,9 +607,8 @@
+ droid_window_cancel_buffer(struct dri2_egl_surface *dri2_surf)
+ {
+    int ret;
+-   int fence_fd = dri2_surf->out_fence_fd;
++   int fence_fd = droid_take_window_buffer_fence(dri2_surf);
+ 
+-   dri2_surf->out_fence_fd = -1;
+    ret = ANativeWindow_cancelBuffer(dri2_surf->window, dri2_surf->buffer,
+                                     fence_fd);
+    dri2_surf->buffer = NULL;

@@ -1,0 +1,4 @@
+Pixel 2 Android theme for the official Pegasus Frontend. The QML renderer, Android game entries and controller integration were adapted for a 640 × 480 display. Original grid presentation, colours and pegasus_g.png are from PegasusG by ROC v1.09 by Blood_roc (commit 91ed046e0b062f687636c93ed79e6cd8a673c7ff). The GBA emulator, Linux hardware scripts and firmware are separate upstream components.
+https://github.com/LPF970915/PegasusG-by-ROC/tree/91ed046e0b062f687636c93ed79e6cd8a673c7ff
+
+The public theme shows the original port credit as text. The upstream logo is distributed by the original project.

@@ -1,0 +1,209 @@
+--- a/packages/apps/Trebuchet/AndroidManifest-common.xml
++++ b/packages/apps/Trebuchet/AndroidManifest-common.xml
+@@ -49,15 +49,13 @@
+     name in the permissions. eq com.mypackage.permission.READ_SETTINGS
+     -->
+     <permission
+         android:name="${packageName}.permission.READ_SETTINGS"
+-        android:permissionGroup="android.permission-group.SYSTEM_TOOLS"
+         android:protectionLevel="signatureOrSystem"
+         android:label="@string/permlab_read_settings"
+         android:description="@string/permdesc_read_settings"/>
+     <permission
+         android:name="${packageName}.permission.WRITE_SETTINGS"
+-        android:permissionGroup="android.permission-group.SYSTEM_TOOLS"
+         android:protectionLevel="signatureOrSystem"
+         android:label="@string/permlab_write_settings"
+         android:description="@string/permdesc_write_settings"/>
+ 
+--- a/packages/apps/Trebuchet/src/com/android/launcher3/DeviceProfile.java
++++ b/packages/apps/Trebuchet/src/com/android/launcher3/DeviceProfile.java
+@@ -572,14 +572,29 @@
+      * If there is not, labels on the Workspace are hidden.
+      * It is important to call this method after the All Apps variables have been set.
+      */
+     private void hideWorkspaceLabelsIfNotEnoughSpace() {
+-        float iconTextHeight = Utilities.calculateTextHeight(iconTextSizePx);
+-        float workspaceCellPaddingY = getCellSize().y - iconSizePx - iconDrawablePaddingPx
++        int iconTextHeight = Utilities.calculateTextHeight(iconTextSizePx);
++        int rowHeight = getCellSize().y;
++        int workspaceCellPaddingY = rowHeight - iconSizePx - iconDrawablePaddingPx
+                 - iconTextHeight;
+ 
+         // We want enough space so that the text is closer to its corresponding icon.
+         if (workspaceCellPaddingY < iconTextHeight) {
++            if (isPhone && isVerticalBarLayout() && iconTextSizePx > 0) {
++                // Fit one label on a short landscape screen while retaining a 48dp icon.
++                int gap = Math.min(iconDrawablePaddingPx, pxFromDp(2, mMetrics));
++                int roomForIcon = rowHeight - iconTextHeight - gap - pxFromDp(8, mMetrics);
++                int compactSize = Math.min(iconSizePx, (int) (roomForIcon / ICON_OVERLAP_FACTOR));
++                if (compactSize >= pxFromDp(48, mMetrics)) {
++                    iconSizePx = compactSize;
++                    iconDrawablePaddingPx = gap;
++                    cellHeightPx = (int) Math.ceil(iconSizePx * ICON_OVERLAP_FACTOR)
++                            + gap + iconTextHeight;
++                    autoResizeAllAppsCells();
++                    return;
++                }
++            }
+             iconTextSizePx = 0;
+             iconDrawablePaddingPx = 0;
+             cellHeightPx = (int) Math.ceil(iconSizePx * ICON_OVERLAP_FACTOR);
+             autoResizeAllAppsCells();
+--- a/packages/apps/Trebuchet/src/com/android/launcher3/LauncherModel.java
++++ b/packages/apps/Trebuchet/src/com/android/launcher3/LauncherModel.java
+@@ -515,8 +515,11 @@
+             synchronized (mLock) {
+                 // Everything loaded bind the data.
+                 mModelLoaded = true;
+             }
++            // Run after close() releases the completed loader transaction.
++            MODEL_EXECUTOR.post(() ->
++                    enqueueModelUpdateTask(AddWorkspaceItemsTask.forInstalledApps()));
+         }
+ 
+         @Override
+         public void close() {
+--- a/packages/apps/Trebuchet/src/com/android/launcher3/model/AddWorkspaceItemsTask.java
++++ b/packages/apps/Trebuchet/src/com/android/launcher3/model/AddWorkspaceItemsTask.java
+@@ -24,12 +24,16 @@
+ import android.os.UserHandle;
+ import android.util.LongSparseArray;
+ import android.util.Pair;
+ 
++import androidx.annotation.Nullable;
++
+ import com.android.launcher3.InvariantDeviceProfile;
+ import com.android.launcher3.LauncherAppState;
+ import com.android.launcher3.LauncherModel.CallbackTask;
+ import com.android.launcher3.LauncherSettings;
++import com.android.launcher3.SessionCommitReceiver;
++import com.android.launcher3.allapps.AppInfoComparator;
+ import com.android.launcher3.config.FeatureFlags;
+ import com.android.launcher3.logging.FileLog;
+ import com.android.launcher3.model.BgDataModel.Callbacks;
+ import com.android.launcher3.model.data.AppInfo;
+@@ -38,14 +42,16 @@
+ import com.android.launcher3.model.data.LauncherAppWidgetInfo;
+ import com.android.launcher3.model.data.WorkspaceItemInfo;
+ import com.android.launcher3.pm.InstallSessionHelper;
+ import com.android.launcher3.pm.PackageInstallInfo;
++import com.android.launcher3.util.ComponentKey;
+ import com.android.launcher3.util.GridOccupancy;
+ import com.android.launcher3.util.IntArray;
+ import com.android.launcher3.util.IntSet;
+ import com.android.launcher3.util.PackageManagerHelper;
+ 
+ import java.util.ArrayList;
++import java.util.HashSet;
+ import java.util.List;
+ 
+ /**
+  * Task to add auto-created workspace items.
+@@ -53,20 +59,32 @@
+ public class AddWorkspaceItemsTask extends BaseModelUpdateTask {
+ 
+     private static final String LOG = "AddWorkspaceItemsTask";
+ 
++    @Nullable
+     private final List<Pair<ItemInfo, Object>> mItemList;
++
++    /** Reconcile real launcher activities, including preinstalled apps and USB installs. */
++    public static AddWorkspaceItemsTask forInstalledApps() {
++        return new AddWorkspaceItemsTask(null);
++    }
+ 
+     /**
+      * @param itemList items to add on the workspace
+      */
+-    public AddWorkspaceItemsTask(List<Pair<ItemInfo, Object>> itemList) {
++    public AddWorkspaceItemsTask(@Nullable List<Pair<ItemInfo, Object>> itemList) {
+         mItemList = itemList;
+     }
+ 
+     @Override
+     public void execute(LauncherAppState app, BgDataModel dataModel, AllAppsList apps) {
+-        if (mItemList.isEmpty()) {
++        final boolean syncInstalled = mItemList == null;
++        if (syncInstalled && !SessionCommitReceiver.isEnabled(app.getContext())) {
++            return;
++        }
++        List<Pair<ItemInfo, Object>> items = syncInstalled
++                ? missingInstalledApps(app, dataModel, apps) : mItemList;
++        if (items.isEmpty()) {
+             return;
+         }
+ 
+         final ArrayList<ItemInfo> addedItemsFinal = new ArrayList<>();
+@@ -75,19 +93,20 @@
+         synchronized(dataModel) {
+             IntArray workspaceScreens = dataModel.collectWorkspaceScreens();
+ 
+             List<ItemInfo> filteredItems = new ArrayList<>();
+-            for (Pair<ItemInfo, Object> entry : mItemList) {
++            for (Pair<ItemInfo, Object> entry : items) {
+                 ItemInfo item = entry.first;
+                 if (item.itemType == LauncherSettings.Favorites.ITEM_TYPE_APPLICATION ||
+                         item.itemType == LauncherSettings.Favorites.ITEM_TYPE_SHORTCUT) {
+                     // Short-circuit this logic if the icon exists somewhere on the workspace
+                     if (shortcutExists(dataModel, item.getIntent(), item.user)) {
+                         continue;
+                     }
+ 
+-                    // b/139663018 Short-circuit this logic if the icon is a system app
+-                    if (PackageManagerHelper.isSystemApp(app.getContext(), item.getIntent())) {
++                    // Keep the package installer's original system-app filtering for promise icons.
++                    if (!syncInstalled && PackageManagerHelper.isSystemApp(
++                            app.getContext(), item.getIntent())) {
+                         continue;
+                     }
+                 }
+ 
+@@ -210,8 +229,33 @@
+             });
+         }
+     }
+ 
++    private static List<Pair<ItemInfo, Object>> missingInstalledApps(
++            LauncherAppState app, BgDataModel dataModel, AllAppsList apps) {
++        HashSet<ComponentKey> represented = new HashSet<>();
++        synchronized (dataModel) {
++            for (ItemInfo item : dataModel.itemsIdMap) {
++                if (item.itemType == LauncherSettings.Favorites.ITEM_TYPE_APPLICATION
++                        && item.getTargetComponent() != null) {
++                    represented.add(new ComponentKey(item.getTargetComponent(), item.user));
++                }
++            }
++        }
++        ArrayList<AppInfo> ordered = new ArrayList<>(apps.data);
++        ordered.sort(new AppInfoComparator(app.getContext()));
++        ArrayList<Pair<ItemInfo, Object>> missing = new ArrayList<>();
++        for (AppInfo info : ordered) {
++            if (info.isAppStartable() && info.componentName != null
++                    && !info.componentName.getClassName().isEmpty()
++                    && !"android.app.AppDetailsActivity".equals(info.componentName.getClassName())
++                    && represented.add(info.toComponentKey())) {
++                missing.add(Pair.create(info, null));
++            }
++        }
++        return missing;
++    }
++
+     /**
+      * Returns true if the shortcuts already exists on the workspace. This must be called after
+      * the workspace has been loaded. We identify a shortcut by its intent.
+      */
+--- a/packages/apps/Trebuchet/src/com/android/launcher3/model/PackageUpdatedTask.java
++++ b/packages/apps/Trebuchet/src/com/android/launcher3/model/PackageUpdatedTask.java
+@@ -355,8 +355,11 @@
+                 dataModel.widgetsModel.update(app, new PackageUserKey(packages[i], mUser));
+             }
+             bindUpdatedWidgets(dataModel);
+         }
++        if (mOp == OP_ADD || mOp == OP_UPDATE) {
++            app.getModel().enqueueModelUpdateTask(AddWorkspaceItemsTask.forInstalledApps());
++        }
+     }
+ 
+     /**
+      * Updates {@param si}'s intent to point to a new ComponentName.

@@ -1,0 +1,1 @@
+-b :duration=6 -b build:use-vbo=true -b texture:texture-filter=linear -b shading:shading=phong -b terrain -b refract

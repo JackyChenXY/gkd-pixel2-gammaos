@@ -1,0 +1,6 @@
+Pixel 2 isolated Mali-G31 test driver, Mesa 24.3.4 with the existing ES100 Pixel 2 baseline.
+Production control SHA256 8f225f82a0fd10912e7e8ad6d678d51da076ad4b96cbf863b3b861fc28ba3801
+Survival test library SHA256 351997b5d03b9b00370a73a39ed390ea12ddaaa07238b8db13068f0be79b1389
+Apply the full patch to the Pixel 2 ES100 source; the delta instead requires the previous recent-burst V6 branch. Do not apply both.
+Only PIXEL2_DEFER_AFBC=survival alters both the Panfrost resource policy and the state-tracker allocation hook. The existing single EGL context requirement and all prior lossless raw AFBC representation guards remain. The game must retain OpenGL. Official APK unchanged. Software decoration window scope must be provided by the experiment harness.
+The allocation hook flushes prior work before creating a large GL texture. GPU-written initialized private textures may enter compaction before a first sampling operation and remain eligible after a long quiet interval. At most six candidates per allocation; up to two cooled-off re-packs on subsequent actual restores. This can stall submissions significantly. The probe covers three 1024x1024 multi-color GPU-rendered sources followed by an 8MiB storage allocation and first sample, and post-rewrite all-pixel checks with scaled blit or copy. Traces and game results are separate evidence.

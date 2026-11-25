@@ -1,0 +1,51 @@
+[
+  {
+    "path": "system/etc/init/pixel2-krkr.rc",
+    "mode": "0644",
+    "selinux": "u:object_r:system_file:s0",
+    "sha256": "8d63ba11bb855ea3ce3dab0cc437b69b4d07fa15a784d02597bd578bf69e78bb"
+  },
+  {
+    "path": "system/etc/pixel2-krkr/check-layout.sh",
+    "mode": "0444",
+    "selinux": "u:object_r:system_file:s0",
+    "sha256": "65833824e298e891a5b2a2401296c659e1349aaf950953e8c54a9b29522cefd9"
+  },
+  {
+    "path": "system/etc/pixel2-krkr/launch.sh",
+    "mode": "0444",
+    "selinux": "u:object_r:system_file:s0",
+    "sha256": "0c47be187caf33bcbb6b72acaa4c7a21da020b3a99eb48f13b04ddc81b9102b9"
+  },
+  {
+    "path": "system/etc/pixel2-krkr/odm-lib",
+    "type": "directory",
+    "mode": "0755",
+    "selinux": "u:object_r:vendor_file:s0"
+  },
+  {
+    "path": "system/etc/pixel2-krkr/odm-lib/libpixel2_krkr_v7.so",
+    "mode": "0444",
+    "selinux": "u:object_r:same_process_hal_file:s0",
+    "sha256": "351997b5d03b9b00370a73a39ed390ea12ddaaa07238b8db13068f0be79b1389"
+  },
+  {
+    "path": "system/etc/pixel2-krkr/odm-lib/modules",
+    "type": "symlink",
+    "target": "/odm_dlkm/lib/modules",
+    "mode": "0644",
+    "selinux": "u:object_r:vendor_file:s0"
+  },
+  {
+    "path": "system/etc/pixel2-krkr/official-software-decor.jar",
+    "mode": "0444",
+    "selinux": "u:object_r:system_file:s0",
+    "sha256": "2149e486d436abe473505cdc79a1cf6652ce61ac8f280302860ef86ecb530179"
+  },
+  {
+    "path": "system/lib/libpixel2_krkr_bootstrap.so",
+    "mode": "0444",
+    "selinux": "u:object_r:system_lib_file:s0",
+    "sha256": "dab5fa1a84891aa4f8703454fb73707183b8c85660ea412592f8e9886852f84f"
+  }
+]

@@ -1,0 +1,208 @@
+diff --git a/packages/apps/Settings/res/xml/system_dashboard_fragment.xml b/packages/apps/Settings/res/xml/system_dashboard_fragment.xml
+--- a/packages/apps/Settings/res/xml/system_dashboard_fragment.xml
++++ b/packages/apps/Settings/res/xml/system_dashboard_fragment.xml
+@@ -43,6 +43,24 @@
+         android:fragment="com.android.settings.datetime.DateTimeSettings"
+         settings:controller="com.android.settings.datetime.DateTimePreferenceController"/>
+ 
++    <SwitchPreference
++        android:key="pixel2_virtual_memory"
++        android:title="@string/pixel2_virtual_memory_title"
++        android:summary="@string/pixel2_virtual_memory_pending"
++        android:icon="@drawable/ic_storage"
++        android:order="-230"
++        android:persistent="false"
++        settings:keywords="@string/pixel2_virtual_memory_keywords"
++        settings:controller="com.android.settings.system.Pixel2VirtualMemoryPreferenceController"/>
++
++    <SwitchPreference
++        android:key="pixel2_virtual_memory_priority"
++        android:dependency="pixel2_virtual_memory"
++        android:title="@string/pixel2_virtual_memory_priority_title"
++        android:order="-229"
++        android:persistent="false"
++        settings:controller="com.android.settings.system.Pixel2VirtualMemoryPreferenceController"/>
++
+     <!-- System updates -->
+     <Preference
+         android:key="additional_system_update_settings"
+diff --git a/packages/apps/Settings/res/values/pixel2_virtual_memory.xml b/packages/apps/Settings/res/values/pixel2_virtual_memory.xml
+new file mode 100644
+--- /dev/null
++++ b/packages/apps/Settings/res/values/pixel2_virtual_memory.xml
+@@ -0,0 +1,19 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="pixel2_virtual_memory_title">Virtual memory</string>
++    <string name="pixel2_virtual_memory_keywords">swap,swap file,microSD,virtual RAM</string>
++    <string name="pixel2_virtual_memory_summary">%1$s\n%2$s</string>
++    <string name="pixel2_virtual_memory_active">2 GiB of virtual memory is active on the microSD card.</string>
++    <string name="pixel2_virtual_memory_priority_title">Use equal priority for zRAM and microSD</string>
++    <string name="pixel2_virtual_memory_active_zram_first">This boot: 2 GiB microSD swap is active. zRAM has priority.</string>
++    <string name="pixel2_virtual_memory_active_shared">This boot: 2 GiB microSD swap is active at the same priority as zRAM.</string>
++    <string name="pixel2_virtual_memory_next_zram_first">When enabled after restart, swap allocations use zRAM first.</string>
++    <string name="pixel2_virtual_memory_next_shared">When enabled after restart, swap allocations can use zRAM and the microSD card at equal priority.</string>
++    <string name="pixel2_virtual_memory_disabled">The extra 2 GiB is currently off.</string>
++    <string name="pixel2_virtual_memory_insufficient_space">The microSD card did not have enough space to enable 2 GiB.</string>
++    <string name="pixel2_virtual_memory_failed">Could not enable virtual memory on this boot.</string>
++    <string name="pixel2_virtual_memory_pending">Current status is not yet available.</string>
++    <string name="pixel2_virtual_memory_next_enabled">Set to turn on after restart.</string>
++    <string name="pixel2_virtual_memory_next_disabled">Set to turn off after restart.</string>
++    <string name="pixel2_virtual_memory_write_failed">Could not save the virtual memory setting.</string>
++</resources>
+diff --git a/packages/apps/Settings/res/values-zh-rCN/pixel2_virtual_memory.xml b/packages/apps/Settings/res/values-zh-rCN/pixel2_virtual_memory.xml
+new file mode 100644
+--- /dev/null
++++ b/packages/apps/Settings/res/values-zh-rCN/pixel2_virtual_memory.xml
+@@ -0,0 +1,19 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="pixel2_virtual_memory_title">虚拟内存</string>
++    <string name="pixel2_virtual_memory_keywords">交换空间,交换文件,扩展内存,存储卡</string>
++    <string name="pixel2_virtual_memory_summary">%1$s\n%2$s</string>
++    <string name="pixel2_virtual_memory_active">存储卡上的 2 GiB 虚拟内存已启用。</string>
++    <string name="pixel2_virtual_memory_priority_title">让 zRAM 和存储卡使用相同优先级</string>
++    <string name="pixel2_virtual_memory_active_zram_first">本次开机已启用 2 GiB 存储卡交换空间，优先使用 zRAM。</string>
++    <string name="pixel2_virtual_memory_active_shared">本次开机已启用 2 GiB 存储卡交换空间，存储卡和 zRAM 的优先级相同。</string>
++    <string name="pixel2_virtual_memory_next_zram_first">重启并启用虚拟内存后，系统会优先使用 zRAM。</string>
++    <string name="pixel2_virtual_memory_next_shared">重启并启用虚拟内存后，系统可按相同优先级向 zRAM 和存储卡换出数据。</string>
++    <string name="pixel2_virtual_memory_disabled">额外的 2 GiB 目前已关闭。</string>
++    <string name="pixel2_virtual_memory_insufficient_space">存储卡剩余空间不足，未能启用 2 GiB 虚拟内存。</string>
++    <string name="pixel2_virtual_memory_failed">本次开机未能启用虚拟内存。</string>
++    <string name="pixel2_virtual_memory_pending">当前状态尚未就绪。</string>
++    <string name="pixel2_virtual_memory_next_enabled">已设为重启后开启。</string>
++    <string name="pixel2_virtual_memory_next_disabled">已设为重启后关闭。</string>
++    <string name="pixel2_virtual_memory_write_failed">无法保存虚拟内存设置。</string>
++</resources>
+diff --git a/packages/apps/Settings/src/com/android/settings/system/Pixel2VirtualMemoryPreferenceController.java b/packages/apps/Settings/src/com/android/settings/system/Pixel2VirtualMemoryPreferenceController.java
+new file mode 100644
+--- /dev/null
++++ b/packages/apps/Settings/src/com/android/settings/system/Pixel2VirtualMemoryPreferenceController.java
+@@ -0,0 +1,127 @@
++/*
++ * Pixel 2 GammaOS port contribution.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.settings.system;
++
++import android.content.Context;
++import android.os.SystemProperties;
++import android.util.Log;
++import android.widget.Toast;
++
++import androidx.preference.Preference;
++import androidx.preference.TwoStatePreference;
++
++import com.android.settings.R;
++import com.android.settings.core.BasePreferenceController;
++
++public class Pixel2VirtualMemoryPreferenceController extends BasePreferenceController
++        implements Preference.OnPreferenceChangeListener {
++
++    private static final String TAG = "Pixel2VirtualMemory";
++    private static final String REQUEST_PROPERTY = "persist.sys.pixel2.extra_swap";
++    private static final String MODE_PROPERTY = "persist.sys.pixel2.extra_swap.mode";
++    private static final String PRIORITY_PROPERTY = "sys.pixel2.extra_swap.priority";
++    private static final String STATUS_PROPERTY = "sys.pixel2.extra_swap.status";
++
++    public Pixel2VirtualMemoryPreferenceController(Context context, String preferenceKey) {
++        super(context, preferenceKey);
++    }
++
++    @Override
++    public int getAvailabilityStatus() {
++        final boolean supported =
++                "gkd_pixel2".equals(SystemProperties.get("ro.product.vendor.device"))
++                && SystemProperties.getBoolean("ro.pixel2.extra_swap.supported", false)
++                && !SystemProperties.getBoolean("ro.gsid.image_running", false);
++        return supported ? AVAILABLE : UNSUPPORTED_ON_DEVICE;
++    }
++
++    @Override
++    public void updateState(Preference preference) {
++        if (preference instanceof TwoStatePreference) {
++            ((TwoStatePreference) preference).setChecked(isRequested());
++        }
++        super.updateState(preference);
++    }
++
++    @Override
++    public CharSequence getSummary() {
++        if (isPriorityControl()) {
++            return mContext.getString(isRequested() ? R.string.pixel2_virtual_memory_next_shared
++                    : R.string.pixel2_virtual_memory_next_zram_first);
++        }
++        final int request = isRequested()
++                ? R.string.pixel2_virtual_memory_next_enabled
++                : R.string.pixel2_virtual_memory_next_disabled;
++        return mContext.getString(R.string.pixel2_virtual_memory_summary,
++                mContext.getString(getStatusMessage()), mContext.getString(request));
++    }
++
++    @Override
++    public boolean onPreferenceChange(Preference preference, Object newValue) {
++        if (!isAvailable() || !(newValue instanceof Boolean)) {
++            return false;
++        }
++        try {
++            boolean enabled = (boolean) newValue;
++            if (isPriorityControl()) {
++                SystemProperties.set(MODE_PROPERTY, enabled ? "shared" : "zram_first");
++            } else {
++                SystemProperties.set(REQUEST_PROPERTY, Boolean.toString(enabled));
++            }
++        } catch (RuntimeException e) {
++            Log.w(TAG, "Could not save the virtual memory request", e);
++            Toast.makeText(mContext, R.string.pixel2_virtual_memory_write_failed,
++                    Toast.LENGTH_SHORT).show();
++            return false;
++        }
++        refreshSummary(preference);
++        return true;
++    }
++
++    private boolean isPriorityControl() {
++        return "pixel2_virtual_memory_priority".equals(getPreferenceKey());
++    }
++
++    private boolean isRequested() {
++        if (isPriorityControl()) {
++            return "shared".equals(SystemProperties.get(MODE_PROPERTY, "zram_first"));
++        }
++        return SystemProperties.getBoolean(REQUEST_PROPERTY, false);
++    }
++
++    private int getStatusMessage() {
++        switch (SystemProperties.get(STATUS_PROPERTY)) {
++            case "active":
++                switch (SystemProperties.get(PRIORITY_PROPERTY)) {
++                    case "10":
++                        return R.string.pixel2_virtual_memory_active_zram_first;
++                    case "100":
++                        return R.string.pixel2_virtual_memory_active_shared;
++                    default:
++                        return R.string.pixel2_virtual_memory_active;
++                }
++            case "disabled":
++                return R.string.pixel2_virtual_memory_disabled;
++            case "insufficient_space":
++                return R.string.pixel2_virtual_memory_insufficient_space;
++            case "failed":
++                return R.string.pixel2_virtual_memory_failed;
++            default:
++                return R.string.pixel2_virtual_memory_pending;
++        }
++    }
++}

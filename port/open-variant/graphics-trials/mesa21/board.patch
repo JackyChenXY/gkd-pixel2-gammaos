@@ -1,0 +1,12 @@
+--- a/device/gamekiddy/gkd_pixel2/BoardConfig.mk
++++ b/device/gamekiddy/gkd_pixel2/BoardConfig.mk
+@@ -29,3 +29,9 @@
+ # This handheld has no camera modules.
+ BOARD_CAMERA_SUPPORT := false
+ BOARD_CAMERA_SUPPORT_EXT := false
++
++# Mesa 21.2.6 Panfrost proof build.
++BOARD_USE_CUSTOMIZED_MESA := true
++BOARD_MESA3D_USES_MESON_BUILD := true
++BOARD_MESA3D_GALLIUM_DRIVERS := panfrost kmsro
++BOARD_MESA3D_VULKAN_DRIVERS :=

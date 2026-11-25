@@ -1,0 +1,6 @@
+* text=auto eol=lf
+*.patch whitespace=-blank-at-eol,-space-before-tab
+LICENSES/NOTICE-*.txt whitespace=-blank-at-eof
+# Preserve the byte-verified AURKNIX input.
+port/kernel-inputs/rk3326s-gkd-pixel2.dts whitespace=-blank-at-eol
+port/rockchip-sdk/rk3326-gkd-pixel2.dts.in whitespace=-blank-at-eof

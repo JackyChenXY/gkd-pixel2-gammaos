@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">Pixel 2 手柄导航</string>
+    <string name="service_description">R1 和功能键几乎同时按下（R1 稍先，间隔最多 0.16 秒）打开导航。十字键选择，A 确认，B 取消。</string>
+    <string name="back">返回</string>
+    <string name="home">桌面</string>
+    <string name="recents">最近任务</string>
+    <string name="help">A 确认　 B 取消</string>
+    <string name="action_unavailable">系统暂时无法执行这项导航操作</string>
+</resources>

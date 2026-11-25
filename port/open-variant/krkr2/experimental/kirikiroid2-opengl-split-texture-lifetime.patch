@@ -1,0 +1,16 @@
+--- a/src/core/visual/ogl/RenderManager_ogl.cpp
++++ b/src/core/visual/ogl/RenderManager_ogl.cpp
+@@ -1075,8 +1075,11 @@
+ 	~tTVPOGLTexture2D_split() {
+ 		internalW = 0;
+ 		internalH = 0;
+-		ClearTextureCache();
+-		Bitmap->Release();
++		// After conversion the base destructor owns the single GL texture.
++		if (Bitmap) {
++			ClearTextureCache();
++			Bitmap->Release();
++		}
+ 	}
+ 	virtual const void * GetScanLineForRead(tjs_uint l) {
+ 		return Bitmap->GetScanLine(l);

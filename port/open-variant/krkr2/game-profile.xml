@@ -1,0 +1,2 @@
+<?xml version='1.0' encoding='utf-8'?>
+<GlobalPreference><Item key="renderer" value="opengl" /><Item key="memusage" value="low" /><Item key="software_compress_tex" value="lz4" /><Item key="ogl_compress_tex" value="half" /><Item key="ogl_max_texsize" value="1792" /></GlobalPreference>

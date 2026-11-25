@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The desktop probe does not install the onboard radio HALs. -->
+<permissions>
+    <unavailable-feature name="android.hardware.bluetooth" />
+    <unavailable-feature name="android.hardware.bluetooth_le" />
+    <unavailable-feature name="android.software.sip" />
+    <unavailable-feature name="android.software.sip.voip" />
+</permissions>

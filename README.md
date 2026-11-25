@@ -1,0 +1,28 @@
+# GammaOS for GKD Pixel 2
+
+适用于 GameKiddy GKD Pixel 2（RK3326S / PX30S）。当前整卡版 **v0.3.0** 基于 GammaOS / Android 12，内置手柄桌面、按键鼠标、电量修正、最近任务内存显示和可选的 2 GiB TF 卡交换空间。
+
+## Windows 一键准备并刷卡
+
+**[下载 Windows 安装助手](https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases/latest/download/Pixel2-Setup.exe)**
+
+1. 把安装助手放到电脑上至少有 **8 GiB 可用空间**的文件夹，双击运行。它会下载公开固件和匹配的 Mali 文件，自动生成并校验双驱动整卡镜像。
+2. 助手会打开 Raspberry Pi Imager。首次使用可按提示安装。在刷卡器里选择 **GKD Pixel 2 → GammaOS** 和目标 TF 卡，核对容量后确认写入。**刷写会清空所选卡。** 建议使用 16 GB 或更大的 TF 卡。
+3. 刷卡器校验完成后，将卡装入已关机的掌机并开机。首次启动会扩展数据区。默认使用 Mesa。要用已经装好的 Mali，打开 **设置 → 系统 → 图形驱动 → 重启试用 Mali**。进桌面后可点 **保留 Mali**。
+
+[刷卡步骤与首次使用](docs/flash-image.md) · [切换驱动和黑屏回退](docs/gpu-drivers.md)
+
+## 直接下载公共镜像
+
+Windows、macOS 和 Linux 都可以把公开的 `.img.gz` 原样刷入 TF 卡，刷好即可使用 Mesa/Panfrost。Windows 助手在电脑上将 Mali 一并加入镜像。两种安装方式使用相同的系统、手柄功能和数据布局。
+
+[下载公开整卡](https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases/latest/download/GKD-Pixel2-GammaOS.img.gz) · [用 Etcher 打开公开镜像](https://efp.balena.io/open-image-url?imageUrl=https%3A%2F%2Fgithub.com%2FJackyChenXY%2Fgkd-pixel2-gammaos%2Freleases%2Fdownload%2Fv0.3.0%2FGKD-Pixel2-GammaOS.img.gz) · [版本、源码和校验值](https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases/latest)
+
+## 掌机操作
+
+- 按功能键退出默认锁屏。长按 Select 切换鼠标，十字键移动，A 点击，按住 B 长按。
+- 最近任务里用左右选择，A 打开，X 关闭。面板会显示物理内存和 TF 卡交换空间的用量。
+- 在「设置 → 无障碍」启用 Pixel 2 手柄导航后，按住 R1 再点功能键可以在游戏中呼出导航。
+- 在「设置 → 系统 → 虚拟内存」可开启额外 2 GiB TF 卡交换空间，重启生效。
+
+[实机记录与验证范围](docs/validation.md) · [模拟器兼容条件](docs/components.md) · [构建说明](docs/build.md) · [第三方许可](THIRD_PARTY_NOTICES.md)

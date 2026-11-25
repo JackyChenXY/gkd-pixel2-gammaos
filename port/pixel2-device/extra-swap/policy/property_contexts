@@ -1,0 +1,5 @@
+persist.sys.pixel2.extra_swap       u:object_r:pixel2_extra_swap_enabled_prop:s0    exact bool
+persist.sys.pixel2.extra_swap.mode  u:object_r:pixel2_extra_swap_enabled_prop:s0    exact enum zram_first shared
+sys.pixel2.extra_swap.status        u:object_r:pixel2_extra_swap_status_prop:s0     exact enum active disabled insufficient_space failed
+sys.pixel2.extra_swap.priority      u:object_r:pixel2_extra_swap_status_prop:s0     exact int
+ro.pixel2.extra_swap.supported      u:object_r:pixel2_extra_swap_supported_prop:s0  exact bool

@@ -1,0 +1,44 @@
+--- a/src/gallium/drivers/panfrost/pan_screen.c
++++ b/src/gallium/drivers/panfrost/pan_screen.c
+@@ -40,6 +40,10 @@
+ 
+ #include <fcntl.h>
+ 
++#if DETECT_OS_ANDROID
++#include <sys/system_properties.h>
++#endif
++
+ #include "drm-uapi/drm_fourcc.h"
+ #include "drm-uapi/panfrost_drm.h"
+ 
+@@ -784,6 +788,20 @@
+         return pan_screen(pscreen)->disk_cache;
+ }
+ 
++static bool
++panfrost_native_fences_enabled(void)
++{
++#if DETECT_OS_ANDROID
++        char value[PROP_VALUE_MAX];
++
++        /* Keep the Android trial off until a fresh screen reads the opt-in. */
++        if (__system_property_get("debug.panfrost.native_fence", value) != 1 ||
++            value[0] != '1')
++                return false;
++#endif
++        return debug_get_bool_option("PAN_MESA_NATIVE_FENCE_FD", true);
++}
++
+ struct pipe_screen *
+ panfrost_create_screen(int fd, struct renderonly *ro)
+ {
+@@ -834,8 +852,7 @@
+         uint64_t syncobj_cap = 0;
+         screen->native_fence_fd =
+                 drmGetCap(fd, DRM_CAP_SYNCOBJ, &syncobj_cap) == 0 &&
+-                syncobj_cap == 1 &&
+-                debug_get_bool_option("PAN_MESA_NATIVE_FENCE_FD", true);
++                syncobj_cap == 1 && panfrost_native_fences_enabled();
+         if (screen->native_fence_fd)
+                 screen->base.fence_get_fd = panfrost_fence_get_fd;
+         screen->base.set_damage_region = panfrost_resource_set_damage_region;

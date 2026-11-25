@@ -1,0 +1,642 @@
+--- a/src/gallium/drivers/panfrost/meson.build
++++ b/src/gallium/drivers/panfrost/meson.build
+@@ -21,6 +21,7 @@
+ 
+ files_panfrost = files(
+   'pan_disk_cache.c',
++  'pan_fence.c',
+   'pan_helpers.c',
+   'pan_public.h',
+   'pan_screen.c',
+--- a/src/gallium/drivers/panfrost/pan_context.c
++++ b/src/gallium/drivers/panfrost/pan_context.c
+@@ -34,9 +34,11 @@
+ 
+ #include "util/macros.h"
+ #include "util/format/u_format.h"
++#include "util/libsync.h"
+ #include "util/u_inlines.h"
+ #include "util/u_upload_mgr.h"
+ #include "util/u_memory.h"
++#include "util/u_surface.h"
+ #include "util/u_vbuf.h"
+ #include "util/half_float.h"
+ #include "util/u_helpers.h"
+@@ -47,6 +49,7 @@
+ #include "util/u_math.h"
+ #include "util/u_debug_cb.h"
+ 
++#include "pan_fence.h"
+ #include "pan_screen.h"
+ #include "pan_util.h"
+ #include "decode.h"
+@@ -569,6 +572,7 @@
+ panfrost_destroy(struct pipe_context *pipe)
+ {
+         struct panfrost_context *panfrost = pan_context(pipe);
++        struct panfrost_device *dev = pan_device(pipe->screen);
+ 
+         _mesa_hash_table_destroy(panfrost->writers, NULL);
+ 
+@@ -581,6 +585,13 @@
+         panfrost_pool_cleanup(&panfrost->descs);
+         panfrost_pool_cleanup(&panfrost->shaders);
+ 
++        if (panfrost->in_sync_obj)
++                drmSyncobjDestroy(dev->fd, panfrost->in_sync_obj);
++        if (panfrost->in_sync_fd != -1)
++                close(panfrost->in_sync_fd);
++
++        if (panfrost->syncobj)
++                drmSyncobjDestroy(dev->fd, panfrost->syncobj);
+         ralloc_free(pipe);
+ }
+ 
+@@ -848,10 +859,49 @@
+         panfrost_flush_all_batches(pan_context(pctx), "Memory barrier");
+ }
+ 
++static void
++panfrost_create_fence_fd(struct pipe_context *pctx,
++                         struct pipe_fence_handle **pfence,
++                         int fd, enum pipe_fd_type type)
++{
++        *pfence = panfrost_fence_from_fd(pan_context(pctx), fd, type);
++}
++
++static void
++panfrost_fence_server_sync(struct pipe_context *pctx,
++                           struct pipe_fence_handle *f)
++{
++        struct panfrost_device *dev = pan_device(pctx->screen);
++        struct panfrost_context *ctx = pan_context(pctx);
++        int fd = -1, ret;
++
++        if (!f)
++                return;
++
++        ret = drmSyncobjExportSyncFile(dev->fd, f->syncobj, &fd);
++        if (ret || fd < 0) {
++                panfrost_fence_finish(pctx->screen, pctx, f, PIPE_TIMEOUT_INFINITE);
++                return;
++        }
++
++        if (ctx->in_sync_fd < 0) {
++                /* Take ownership of the exported FD. */
++                ctx->in_sync_fd = fd;
++                return;
++        }
++
++        if (sync_accumulate("panfrost", &ctx->in_sync_fd, fd))
++                sync_wait(fd, -1);
++        close(fd);
++}
++
+ struct pipe_context *
+ panfrost_create_context(struct pipe_screen *screen, void *priv, unsigned flags)
+ {
+         struct panfrost_context *ctx = rzalloc(NULL, struct panfrost_context);
++        if (!ctx)
++                return NULL;
++
+         struct pipe_context *gallium = (struct pipe_context *) ctx;
+         struct panfrost_device *dev = pan_device(screen);
+ 
+@@ -861,6 +911,12 @@
+ 
+         gallium->set_framebuffer_state = panfrost_set_framebuffer_state;
+         gallium->set_debug_callback = u_default_set_debug_callback;
++
++        if (pan_screen(screen)->native_fence_fd) {
++                gallium->create_fence_fd = panfrost_create_fence_fd;
++                gallium->fence_server_sync = panfrost_fence_server_sync;
++        }
++        ctx->in_sync_fd = -1;
+ 
+         gallium->flush = panfrost_flush;
+         gallium->clear = panfrost_clear;
+@@ -950,7 +1006,18 @@
+          * last queued job out_sync every time we submit a new job.
+          */
+         ret = drmSyncobjCreate(dev->fd, DRM_SYNCOBJ_CREATE_SIGNALED, &ctx->syncobj);
+-        assert(!ret && ctx->syncobj);
++        if (ret || !ctx->syncobj)
++                goto fail_syncobj;
++
++        if (pan_screen(screen)->native_fence_fd) {
++                ret = drmSyncobjCreate(dev->fd, 0, &ctx->in_sync_obj);
++                if (ret || !ctx->in_sync_obj)
++                        goto fail_syncobj;
++        }
+ 
+         return gallium;
+-}
++
++fail_syncobj:
++        panfrost_destroy(gallium);
++        return NULL;
++}
+--- a/src/gallium/drivers/panfrost/pan_context.h
++++ b/src/gallium/drivers/panfrost/pan_context.h
+@@ -107,12 +107,6 @@
+         bool msaa;
+ };
+ 
+-struct pipe_fence_handle {
+-        struct pipe_reference reference;
+-        uint32_t syncobj;
+-        bool signaled;
+-};
+-
+ struct panfrost_streamout_target {
+         struct pipe_stream_output_target base;
+         uint32_t offset;
+@@ -231,6 +225,9 @@
+ 
+         /* Mask of active render targets */
+         uint8_t fb_rt_mask;
++
++        int in_sync_fd;
++        uint32_t in_sync_obj;
+ };
+ 
+ /* Corresponds to the CSO */
+--- /dev/null
++++ b/src/gallium/drivers/panfrost/pan_fence.c
+@@ -0,0 +1,167 @@
++/*
++ * Copyright (c) 2022 Amazon.com, Inc. or its affiliates.
++ * Copyright (C) 2008 VMware, Inc.
++ * Copyright (C) 2014 Broadcom
++ * Copyright (C) 2018 Alyssa Rosenzweig
++ * Copyright (C) 2019 Collabora, Ltd.
++ * Copyright (C) 2012 Rob Clark <robclark@freedesktop.org>
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice (including the next
++ * paragraph) shall be included in all copies or substantial portions of the
++ * Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++ * SOFTWARE.
++ */
++
++#include "pan_context.h"
++#include "pan_fence.h"
++#include "util/libsync.h"
++#include "pan_screen.h"
++
++#include "util/os_time.h"
++#include "util/u_inlines.h"
++
++void
++panfrost_fence_reference(struct pipe_screen *pscreen,
++                         struct pipe_fence_handle **ptr,
++                         struct pipe_fence_handle *fence)
++{
++        struct panfrost_device *dev = pan_device(pscreen);
++        struct pipe_fence_handle *old = *ptr;
++
++        if (pipe_reference(&old->reference, &fence->reference)) {
++                drmSyncobjDestroy(dev->fd, old->syncobj);
++                free(old);
++        }
++
++        *ptr = fence;
++}
++
++bool
++panfrost_fence_finish(struct pipe_screen *pscreen,
++                      struct pipe_context *ctx,
++                      struct pipe_fence_handle *fence,
++                      uint64_t timeout)
++{
++        struct panfrost_device *dev = pan_device(pscreen);
++        int ret;
++
++        if (fence->signaled)
++                return true;
++
++        uint64_t abs_timeout = os_time_get_absolute_timeout(timeout);
++        if (abs_timeout == OS_TIMEOUT_INFINITE)
++                abs_timeout = INT64_MAX;
++
++        ret = drmSyncobjWait(dev->fd, &fence->syncobj,
++                             1,
++                             abs_timeout, DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL,
++                             NULL);
++
++        fence->signaled = (ret >= 0);
++        return fence->signaled;
++}
++
++int
++panfrost_fence_get_fd(struct pipe_screen *screen,
++                      struct pipe_fence_handle *f)
++{
++        struct panfrost_device *dev = pan_device(screen);
++        int fd = -1;
++
++        drmSyncobjExportSyncFile(dev->fd, f->syncobj, &fd);
++        return fd;
++}
++
++struct pipe_fence_handle *
++panfrost_fence_from_fd(struct panfrost_context *ctx, int fd,
++                       enum pipe_fd_type type)
++{
++        struct panfrost_device *dev = pan_device(ctx->base.screen);
++        int ret;
++
++        struct pipe_fence_handle *f = calloc(1, sizeof(*f));
++        if (!f)
++                return NULL;
++
++        if (type == PIPE_FD_TYPE_NATIVE_SYNC) {
++                ret = drmSyncobjCreate(dev->fd, 0, &f->syncobj);
++                if (ret) {
++                        fprintf(stderr, "create syncobj failed\n");
++                        goto err_free_fence;
++                }
++
++                ret = drmSyncobjImportSyncFile(dev->fd, f->syncobj, fd);
++                if (ret) {
++                        fprintf(stderr, "import syncfile failed\n");
++                        goto err_destroy_syncobj;
++                }
++        } else {
++                assert(type == PIPE_FD_TYPE_SYNCOBJ);
++                ret = drmSyncobjFDToHandle(dev->fd, fd, &f->syncobj);
++                if (ret) {
++                        fprintf(stderr, "import syncobj FD failed\n");
++                        goto err_free_fence;
++                }
++        }
++
++        pipe_reference_init(&f->reference, 1);
++
++        return f;
++
++err_destroy_syncobj:
++        drmSyncobjDestroy(dev->fd, f->syncobj);
++err_free_fence:
++        free(f);
++        return NULL;
++}
++
++struct pipe_fence_handle *
++panfrost_fence_create(struct panfrost_context *ctx)
++{
++        struct panfrost_device *dev = pan_device(ctx->base.screen);
++        int fd = -1, ret;
++
++        /* Snapshot the last rendering out fence. We'd rather have another
++         * syncobj instead of a sync file, but this is all we get.
++         * (HandleToFD/FDToHandle just gives you another syncobj ID for the
++         * same syncobj).
++         */
++        ret = drmSyncobjExportSyncFile(dev->fd, ctx->syncobj, &fd);
++        if (ret || fd == -1) {
++                fprintf(stderr, "export failed\n");
++                return NULL;
++        }
++
++        /* A fence captured without a job still follows outstanding waits. */
++        if (ctx->in_sync_fd >= 0) {
++                int merged = sync_merge("panfrost", fd, ctx->in_sync_fd);
++                if (merged >= 0) {
++                        close(fd);
++                        fd = merged;
++                } else if (sync_wait(ctx->in_sync_fd, -1)) {
++                        close(fd);
++                        return NULL;
++                }
++        }
++
++        struct pipe_fence_handle *f =
++                panfrost_fence_from_fd(ctx, fd, PIPE_FD_TYPE_NATIVE_SYNC);
++
++        close(fd);
++
++        return f;
++}
+--- /dev/null
++++ b/src/gallium/drivers/panfrost/pan_fence.h
+@@ -0,0 +1,58 @@
++/*
++ * Copyright (c) 2022 Amazon.com, Inc. or its affiliates.
++ * Copyright 2018-2019 Alyssa Rosenzweig
++ * Copyright 2018-2019 Collabora, Ltd.
++ * All Rights Reserved.
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the
++ * "Software"), to deal in the Software without restriction, including
++ * without limitation the rights to use, copy, modify, merge, publish,
++ * distribute, sub license, and/or sell copies of the Software, and to
++ * permit persons to whom the Software is furnished to do so, subject to
++ * the following conditions:
++ *
++ * The above copyright notice and this permission notice (including the
++ * next paragraph) shall be included in all copies or substantial portions
++ * of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
++ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
++ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT.
++ * IN NO EVENT SHALL VMWARE AND/OR ITS SUPPLIERS BE LIABLE FOR
++ * ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
++ * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
++ * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
++ */
++
++#include "pipe/p_state.h"
++
++struct panfrost_context;
++
++struct pipe_fence_handle {
++        struct pipe_reference reference;
++        uint32_t syncobj;
++        bool signaled;
++};
++
++void
++panfrost_fence_reference(struct pipe_screen *pscreen,
++                         struct pipe_fence_handle **ptr,
++                         struct pipe_fence_handle *fence);
++
++bool
++panfrost_fence_finish(struct pipe_screen *pscreen,
++                      struct pipe_context *ctx,
++                      struct pipe_fence_handle *fence,
++                      uint64_t timeout);
++
++int
++panfrost_fence_get_fd(struct pipe_screen *screen,
++                      struct pipe_fence_handle *f);
++
++struct pipe_fence_handle *
++panfrost_fence_from_fd(struct panfrost_context *ctx, int fd,
++                       enum pipe_fd_type type);
++
++struct pipe_fence_handle *
++panfrost_fence_create(struct panfrost_context *ctx);
+--- a/src/gallium/drivers/panfrost/pan_job.c
++++ b/src/gallium/drivers/panfrost/pan_job.c
+@@ -31,6 +31,7 @@
+ #include "pan_bo.h"
+ #include "pan_context.h"
+ #include "util/hash_table.h"
++#include "util/libsync.h"
+ #include "util/ralloc.h"
+ #include "util/format/u_format.h"
+ #include "util/u_pack_color.h"
+@@ -646,6 +647,8 @@
+         struct pipe_context *gallium = (struct pipe_context *) ctx;
+         struct panfrost_device *dev = pan_device(gallium->screen);
+         struct drm_panfrost_submit submit = {0,};
++        uint32_t in_syncs[2];
++        bool consumes_in_sync_fd = ctx->in_sync_fd >= 0;
+         uint32_t *bo_handles;
+         int ret;
+ 
+@@ -660,10 +663,22 @@
+         submit.out_sync = out_sync;
+         submit.jc = first_job_desc;
+         submit.requirements = reqs;
+-        if (in_sync) {
+-                submit.in_syncs = (u64)(uintptr_t)(&in_sync);
+-                submit.in_sync_count = 1;
+-        }
++
++        if (in_sync)
++                in_syncs[submit.in_sync_count++] = in_sync;
++
++        if (consumes_in_sync_fd) {
++                ret = drmSyncobjImportSyncFile(dev->fd, ctx->in_sync_obj,
++                                               ctx->in_sync_fd);
++                if (!ret) {
++                        in_syncs[submit.in_sync_count++] = ctx->in_sync_obj;
++                } else if (sync_wait(ctx->in_sync_fd, -1)) {
++                        return errno;
++                }
++        }
++
++        if (submit.in_sync_count)
++                submit.in_syncs = (uintptr_t)in_syncs;
+ 
+         bo_handles = calloc(panfrost_pool_num_bos(&batch->pool) +
+                             panfrost_pool_num_bos(&batch->invisible_pool) +
+@@ -717,6 +732,12 @@
+ 
+         if (ret)
+                 return errno;
++
++        if (consumes_in_sync_fd && !ctx->is_noop) {
++                /* Only a successful real submit owns this dependency. */
++                close(ctx->in_sync_fd);
++                ctx->in_sync_fd = -1;
++        }
+ 
+         /* Trace the job if we're doing that */
+         if (dev->debug & (PAN_DBG_TRACE | PAN_DBG_SYNC)) {
+--- a/src/gallium/drivers/panfrost/pan_screen.c
++++ b/src/gallium/drivers/panfrost/pan_screen.c
+@@ -44,6 +44,7 @@
+ #include "drm-uapi/panfrost_drm.h"
+ 
+ #include "pan_bo.h"
++#include "pan_fence.h"
+ #include "pan_shader.h"
+ #include "pan_screen.h"
+ #include "pan_resource.h"
+@@ -349,6 +350,9 @@
+         case PIPE_CAP_IMAGE_STORE_FORMATTED:
+                 return 1;
+ 
++        case PIPE_CAP_NATIVE_FENCE_FD:
++                return pan_screen(screen)->native_fence_fd;
++
+         default:
+                 return u_pipe_screen_get_param_defaults(screen, param);
+         }
+@@ -764,95 +768,6 @@
+ 
+         disk_cache_destroy(screen->disk_cache);
+         ralloc_free(pscreen);
+-}
+-
+-static void
+-panfrost_fence_reference(struct pipe_screen *pscreen,
+-                         struct pipe_fence_handle **ptr,
+-                         struct pipe_fence_handle *fence)
+-{
+-        struct panfrost_device *dev = pan_device(pscreen);
+-        struct pipe_fence_handle *old = *ptr;
+-
+-        if (pipe_reference(&old->reference, &fence->reference)) {
+-                drmSyncobjDestroy(dev->fd, old->syncobj);
+-                free(old);
+-        }
+-
+-        *ptr = fence;
+-}
+-
+-static bool
+-panfrost_fence_finish(struct pipe_screen *pscreen,
+-                      struct pipe_context *ctx,
+-                      struct pipe_fence_handle *fence,
+-                      uint64_t timeout)
+-{
+-        struct panfrost_device *dev = pan_device(pscreen);
+-        int ret;
+-
+-        if (fence->signaled)
+-                return true;
+-
+-        uint64_t abs_timeout = os_time_get_absolute_timeout(timeout);
+-        if (abs_timeout == OS_TIMEOUT_INFINITE)
+-                abs_timeout = INT64_MAX;
+-
+-        ret = drmSyncobjWait(dev->fd, &fence->syncobj,
+-                             1,
+-                             abs_timeout, DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL,
+-                             NULL);
+-
+-        fence->signaled = (ret >= 0);
+-        return fence->signaled;
+-}
+-
+-struct pipe_fence_handle *
+-panfrost_fence_create(struct panfrost_context *ctx)
+-{
+-        struct pipe_fence_handle *f = calloc(1, sizeof(*f));
+-        if (!f)
+-                return NULL;
+-
+-        struct panfrost_device *dev = pan_device(ctx->base.screen);
+-        int fd = -1, ret;
+-
+-        /* Snapshot the last rendering out fence. We'd rather have another
+-         * syncobj instead of a sync file, but this is all we get.
+-         * (HandleToFD/FDToHandle just gives you another syncobj ID for the
+-         * same syncobj).
+-         */
+-        ret = drmSyncobjExportSyncFile(dev->fd, ctx->syncobj, &fd);
+-        if (ret || fd == -1) {
+-                fprintf(stderr, "export failed\n");
+-                goto err_free_fence;
+-        }
+-
+-        ret = drmSyncobjCreate(dev->fd, 0, &f->syncobj);
+-        if (ret) {
+-                fprintf(stderr, "create syncobj failed\n");
+-                goto err_close_fd;
+-        }
+-
+-        ret = drmSyncobjImportSyncFile(dev->fd, f->syncobj, fd);
+-        if (ret) {
+-                fprintf(stderr, "create syncobj failed\n");
+-                goto err_destroy_syncobj;
+-        }
+-
+-        assert(f->syncobj != ctx->syncobj);
+-        close(fd);
+-        pipe_reference_init(&f->reference, 1);
+-
+-        return f;
+-
+-err_destroy_syncobj:
+-        drmSyncobjDestroy(dev->fd, f->syncobj);
+-err_close_fd:
+-        close(fd);
+-err_free_fence:
+-        free(f);
+-        return NULL;
+ }
+ 
+ static const void *
+@@ -915,6 +830,14 @@
+         screen->base.get_disk_shader_cache = panfrost_get_disk_shader_cache;
+         screen->base.fence_reference = panfrost_fence_reference;
+         screen->base.fence_finish = panfrost_fence_finish;
++        /* Binary syncobj capability is required by the imported FD path. */
++        uint64_t syncobj_cap = 0;
++        screen->native_fence_fd =
++                drmGetCap(fd, DRM_CAP_SYNCOBJ, &syncobj_cap) == 0 &&
++                syncobj_cap == 1 &&
++                debug_get_bool_option("PAN_MESA_NATIVE_FENCE_FD", true);
++        if (screen->native_fence_fd)
++                screen->base.fence_get_fd = panfrost_fence_get_fd;
+         screen->base.set_damage_region = panfrost_resource_set_damage_region;
+ 
+         panfrost_resource_screen_init(&screen->base);
+--- a/src/gallium/drivers/panfrost/pan_screen.h
++++ b/src/gallium/drivers/panfrost/pan_screen.h
+@@ -109,6 +109,7 @@
+ 
+         struct panfrost_vtable vtbl;
+         struct disk_cache *disk_cache;
++        bool native_fence_fd;
+ };
+ 
+ static inline struct panfrost_screen *
+@@ -122,9 +123,6 @@
+ {
+         return &(pan_screen(p)->dev);
+ }
+-
+-struct pipe_fence_handle *
+-panfrost_fence_create(struct panfrost_context *ctx);
+ 
+ void panfrost_cmdstream_screen_init_v4(struct panfrost_screen *screen);
+ void panfrost_cmdstream_screen_init_v5(struct panfrost_screen *screen);
+--- a/src/gallium/frontends/dri/dri2.c
++++ b/src/gallium/frontends/dri/dri2.c
+@@ -403,7 +403,8 @@
+ {
+    validate_fence_fd(fd);
+    validate_fence_fd(img->in_fence_fd);
+-   sync_accumulate("dri", &img->in_fence_fd, fd);
++   if (sync_accumulate("dri", &img->in_fence_fd, fd) || img->in_fence_fd < 0)
++      sync_wait(fd, -1);
+ }
+ 
+ static void
+@@ -422,8 +423,12 @@
+    img->in_fence_fd = -1;
+ 
+    pipe->create_fence_fd(pipe, &fence, fd, PIPE_FD_TYPE_NATIVE_SYNC);
+-   pipe->fence_server_sync(pipe, fence);
+-   pipe->screen->fence_reference(pipe->screen, &fence, NULL);
++   if (fence) {
++      pipe->fence_server_sync(pipe, fence);
++      pipe->screen->fence_reference(pipe->screen, &fence, NULL);
++   } else {
++      sync_wait(fd, -1);
++   }
+ 
+    close(fd);
+ }
+--- a/src/gallium/frontends/dri/dri_helpers.c
++++ b/src/gallium/frontends/dri/dri_helpers.c
+@@ -119,6 +119,8 @@
+    struct st_context_iface *stapi = dri_context(_ctx)->st;
+    struct pipe_context *ctx = stapi->pipe;
+    struct dri2_fence *fence = CALLOC_STRUCT(dri2_fence);
++   if (!fence)
++      return NULL;
+ 
+    /* Wait for glthread to finish because we can't use pipe_context from
+     * multiple threads.

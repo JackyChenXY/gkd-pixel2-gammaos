@@ -1,0 +1,17 @@
+# Stage the private storage directory before persistent settings are loaded.
+on post-fs-data && property:ro.product.vendor.device=gkd_pixel2 && property:ro.gsid.image_running=0 && property:ro.pixel2.extra_swap.supported=true
+    mkdir /data/pixel2-swap 0700 root root encryption=None
+
+# This readonly property is set once at boot. Changing the setting never
+# starts or stops disk swap while the framework is running.
+on property:ro.persistent_properties.ready=true && property:ro.product.vendor.device=gkd_pixel2 && property:ro.gsid.image_running=0 && property:ro.pixel2.extra_swap.supported=true
+    start pixel2-extra-swap
+
+service pixel2-extra-swap /system/bin/pixel2-extra-swap ${persist.sys.pixel2.extra_swap:-false} ${persist.sys.pixel2.extra_swap.mode:-zram_first}
+    class core
+    user root
+    group root
+    capabilities SYS_ADMIN
+    disabled
+    oneshot
+    stdio_to_kmsg

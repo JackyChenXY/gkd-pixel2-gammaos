@@ -1,0 +1,13 @@
+{
+  "baseline_sha256": "c1b02e6096a4a26d2d9f0e1935c43330636d64330f3ac563c2ea767645c2f17e",
+  "sha256": "6ecdaa0ec8f48b579d317e2d18a8200cb9aa1ce1f61da1965e0c3a5b15ec5a1b",
+  "bytes": 1318436864,
+  "existing_paths_verified": 4933,
+  "added_directories": [
+    "system/etc/pixel2-krkr",
+    "system/etc/pixel2-krkr/odm-lib"
+  ],
+  "avb": "SHA256_RSA2048, verified key and tree, same salt and rollback index",
+  "recomputed_fec_bytes": 10338304,
+  "ext4": "e2fsck -fn passed; all pre-existing file bytes, link targets, owners, modes, device numbers and xattrs match baseline"
+}

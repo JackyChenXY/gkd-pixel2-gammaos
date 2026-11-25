@@ -1,0 +1,44 @@
+diff --git a/system/core/init/reboot.cpp b/system/core/init/reboot.cpp
+--- a/system/core/init/reboot.cpp
++++ b/system/core/init/reboot.cpp
+@@ -403,6 +403,22 @@
+     }
+ }
+ 
++static void ReleasePixel2DiskSwap() {
++    if (!GetBoolProperty("ro.pixel2.extra_swap.supported", false) ||
++        GetBoolProperty("ro.gsid.image_running", false) ||
++        android::base::GetProperty("ro.product.vendor.device", "") != "gkd_pixel2") {
++        return;
++    }
++
++    const char* args[] = {"/system/bin/pixel2-extra-swap", "shutdown"};
++    int status;
++    if (logwrap_fork_execvp(arraysize(args), args, &status, false, LOG_KLOG, true, nullptr) != 0) {
++        PLOG(WARNING) << "Unable to start the Pixel 2 disk swap shutdown helper";
++    } else if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
++        LOG(WARNING) << "Unable to release the Pixel 2 disk swap: " << status;
++    }
++}
++
+ /* Try umounting all emulated file systems R/W block device cfile systems.
+  * This will just try umount and give it up if it fails.
+  * For fs like ext4, this is ok as file system will be marked as unclean shutdown
+@@ -427,6 +443,7 @@
+         LOG(INFO) << "umount timeout, last resort, kill all and try";
+         if (DUMP_ON_UMOUNT_FAILURE) DumpUmountDebuggingInfo();
+         KillAllProcesses();
++        ReleasePixel2DiskSwap();
+         // even if it succeeds, still it is timeout and do not run fsck with all processes killed
+         UmountStat st = UmountPartitions(0ms);
+         if ((st != UMOUNT_STAT_SUCCESS) && DUMP_ON_UMOUNT_FAILURE) DumpUmountDebuggingInfo();
+@@ -719,6 +736,9 @@
+     }
+     // logcat stopped here
+     StopServices(kDebuggingServices, 0ms, false /* SIGKILL */);
++    // Release a file swap after stopping userspace and before disabling ZRAM or
++    // unmounting userdata. Keep ZRAM available while disk pages are reclaimed.
++    ReleasePixel2DiskSwap();
+     // 4. sync, try umount, and optionally run fsck for user shutdown
+     {
+         Timer sync_timer;

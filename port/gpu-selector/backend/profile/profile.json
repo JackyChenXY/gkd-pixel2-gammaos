@@ -1,0 +1,243 @@
+{
+  "raw_size": 113778688,
+  "files": [
+    {
+      "path": "bin/hw/android.hardware.graphics.allocator@4.0-service",
+      "size": 4248,
+      "hash": "d9c19ecf274af90c31262f591f39f9cbabf8af15fc735d5bb607f776c83fff00",
+      "mode": 493,
+      "uid": 0,
+      "gid": 2000,
+      "label": "u:object_r:hal_graphics_allocator_default_exec:s0",
+      "source": [
+        [
+          2310144,
+          4248
+        ]
+      ],
+      "dest": [
+        [
+          41943040,
+          4248
+        ]
+      ]
+    },
+    {
+      "path": "bin/hw/android.hardware.graphics.composer@2.1-service",
+      "size": 55272,
+      "hash": "8035a3d1d311726af4d6df3c4a39bf587bb380e647497e2d4163448f0d3e1641",
+      "mode": 493,
+      "uid": 0,
+      "gid": 2000,
+      "label": "u:object_r:hal_graphics_composer_default_exec:s0",
+      "source": [
+        [
+          2318336,
+          55272
+        ]
+      ],
+      "dest": [
+        [
+          41951232,
+          55272
+        ]
+      ]
+    },
+    {
+      "path": "etc/init/android.hardware.graphics.allocator@4.0-service.rc",
+      "size": 293,
+      "hash": "7975cd3284516cd848027278302998a7b10669aea0d7d078c754255a4709b7f7",
+      "mode": 420,
+      "uid": 0,
+      "gid": 0,
+      "label": "u:object_r:vendor_configs_file:s0",
+      "source": [
+        [
+          41811968,
+          293
+        ]
+      ],
+      "dest": [
+        [
+          42008576,
+          293
+        ]
+      ]
+    },
+    {
+      "path": "etc/init/android.hardware.graphics.composer@2.1-service.rc",
+      "size": 342,
+      "hash": "2272ae38541f35caa05f7ca426f690e32b92c930622317e925e7796a29708bfa",
+      "mode": 420,
+      "uid": 0,
+      "gid": 0,
+      "label": "u:object_r:vendor_configs_file:s0",
+      "source": [
+        [
+          41816064,
+          342
+        ]
+      ],
+      "dest": [
+        [
+          42012672,
+          342
+        ]
+      ]
+    },
+    {
+      "path": "lib/arm.graphics-V3-ndk_platform.so",
+      "size": 2388,
+      "hash": "f18f2428b03fb60a54588764725c6bba4573a1b21714e0502664753f558be346",
+      "mode": 420,
+      "uid": 0,
+      "gid": 0,
+      "label": "u:object_r:same_process_hal_file:s0",
+      "source": [
+        [
+          61304832,
+          2388
+        ]
+      ],
+      "dest": [
+        [
+          42016768,
+          2388
+        ]
+      ]
+    },
+    {
+      "path": "lib/egl/libGLES_mali.so",
+      "size": 27984060,
+      "hash": "2749fb338702b3f9a1ebdc7b9e790bb685aba2949b5892343664dbc75f1699b7",
+      "mode": 420,
+      "uid": 0,
+      "gid": 0,
+      "label": "u:object_r:same_process_hal_file:s0",
+      "source": [
+        [
+          61313024,
+          27984060
+        ]
+      ],
+      "dest": [
+        [
+          50331648,
+          25165824
+        ],
+        [
+          44040192,
+          2818236
+        ]
+      ]
+    },
+    {
+      "path": "lib/hw/android.hardware.graphics.allocator@4.0-impl-bifrost.so",
+      "size": 55376,
+      "hash": "c8fcc8a9b0a7f3848c1d84af4262312f71e5433a58f27f4ef625029058d30379",
+      "mode": 420,
+      "uid": 0,
+      "gid": 0,
+      "label": "u:object_r:same_process_hal_file:s0",
+      "source": [
+        [
+          89718784,
+          55376
+        ]
+      ],
+      "dest": [
+        [
+          42020864,
+          55376
+        ]
+      ]
+    },
+    {
+      "path": "lib/hw/android.hardware.graphics.mapper@4.0-impl-bifrost.so",
+      "size": 105140,
+      "hash": "a1c83541b474c6a9dab62ddec62a40aede4459934b64b6f9f7014fb3152aaf01",
+      "mode": 420,
+      "uid": 0,
+      "gid": 0,
+      "label": "u:object_r:same_process_hal_file:s0",
+      "source": [
+        [
+          89776128,
+          105140
+        ]
+      ],
+      "dest": [
+        [
+          37810176,
+          105140
+        ]
+      ]
+    },
+    {
+      "path": "lib/hw/hwcomposer.rk30board.so",
+      "size": 390912,
+      "hash": "081c674888b50fff9275effd3d7c371171c09f2bd6ffb5915e586bacca6ccf2e",
+      "mode": 420,
+      "uid": 0,
+      "gid": 0,
+      "label": "u:object_r:vendor_file:s0",
+      "source": [
+        [
+          91119616,
+          390912
+        ]
+      ],
+      "dest": [
+        [
+          37916672,
+          390912
+        ]
+      ]
+    },
+    {
+      "path": "lib/librga.so",
+      "size": 110832,
+      "hash": "28be9ef4a6dc9b60855728e33f611eb4b02e03f6fe4637e426d486346c96f744",
+      "mode": 420,
+      "uid": 0,
+      "gid": 0,
+      "label": "u:object_r:same_process_hal_file:s0",
+      "source": [
+        [
+          99192832,
+          110832
+        ]
+      ],
+      "dest": [
+        [
+          1871872,
+          110832
+        ]
+      ]
+    },
+    {
+      "path": "lib/libsync_vendor.so",
+      "size": 5280,
+      "hash": "6538e5e7bce9a81122ea0ba315d33f555e329bcbc76fb2767f5879844703c2e2",
+      "mode": 420,
+      "uid": 0,
+      "gid": 0,
+      "label": "u:object_r:vendor_file:s0",
+      "source": [
+        [
+          104210432,
+          5280
+        ]
+      ],
+      "dest": [
+        [
+          42078208,
+          5280
+        ]
+      ]
+    }
+  ],
+  "slot_size": 134217728,
+  "empty_hash": "4ee9b3bd95cab2829e682f4a4e5ae4cad0e58422371327e3b86a52c1c4fb968d",
+  "full_hash": "ed51573d66661ca97d139ef17ceeaf986d7b2c953abf354cec035b1bf64e55c0"
+}

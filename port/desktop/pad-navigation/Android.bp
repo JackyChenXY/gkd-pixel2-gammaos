@@ -1,0 +1,22 @@
+android_app {
+    name: "Pixel2PadNavigation",
+    manifest: "AndroidManifest.xml",
+    srcs: ["src/**/*.java"],
+    resource_dirs: ["res"],
+    sdk_version: "current",
+    min_sdk_version: "26",
+    target_sdk_version: "32",
+    jni_libs: ["libpixel2_padchord"],
+    compile_multilib: "32",
+    use_embedded_native_libs: true,
+}
+
+cc_library_shared {
+    name: "libpixel2_padchord",
+    stem: "libpadchord",
+    srcs: ["jni/pad_chord.c"],
+    sdk_version: "26",
+    compile_multilib: "32",
+    cflags: ["-D_GNU_SOURCE", "-Wall", "-Wextra"],
+    stl: "none",
+}

@@ -1,0 +1,160 @@
+--- a/src/egl/drivers/dri2/platform_android.c
++++ b/src/egl/drivers/dri2/platform_android.c
+@@ -49,6 +49,10 @@
+ #include "loader.h"
+ #include "loader_dri_helper.h"
+ #include "platform_android.h"
++#include "util/log.h"
++
++bool pixel2_describe_linear_rgb(const struct ANativeWindowBuffer *buffer,
++                                struct u_gralloc_buffer_basic_info *out);
+ #include "dri_util.h"
+ 
+ static struct dri_image *
+@@ -87,6 +91,17 @@
+    };
+    struct dri_image *img = NULL;
+ 
++   /* This board's common RGB window buffers carry their complete layout.
++    * The mapper handles other layouts and retries any failed direct import. */
++   if (pixel2_describe_linear_rgb(buf, &buf_info)) {
++      img = droid_create_image_from_buffer_info(dri2_dpy, buf->width, buf->height,
++                                                &buf_info, &color_info, priv);
++      if (img) {
++         mesa_logi_once("Pixel 2 system EGL: imported linear RGB window buffer");
++         return img;
++      }
++   }
++
+    if (u_gralloc_get_buffer_basic_info(dri2_dpy->gralloc, &gr_handle,
+                                        &buf_info))
+       return 0;
+@@ -182,6 +197,29 @@
+    }
+ 
+    return EGL_TRUE;
++}
++
++/* Buffer-age queries can dequeue a slot without issuing GPU work. Returning
++ * it must preserve the old consumer's fence as well as any rendering fence. */
++static int
++pixel2_take_window_fence(struct dri2_egl_surface *surf)
++{
++   int in = surf->in_fence_fd;
++   int out = surf->out_fence_fd;
++   surf->in_fence_fd = surf->out_fence_fd = -1;
++   if (in < 0 || in == out)
++      return out;
++   if (out < 0)
++      return in;
++   int merged = sync_merge("pixel2-window", out, in);
++   if (merged < 0) {
++      sync_wait(in, -1);
++      close(in);
++      return out;
++   }
++   close(in);
++   close(out);
++   return merged;
+ }
+ 
+ static EGLBoolean
+@@ -198,8 +236,7 @@
+     * consumer is responsible for closing it. Caller must not use the fd
+     * after passing it to queueBuffer.
+     */
+-   int fence_fd = dri2_surf->out_fence_fd;
+-   dri2_surf->out_fence_fd = -1;
++   int fence_fd = pixel2_take_window_fence(dri2_surf);
+    ANativeWindow_queueBuffer(dri2_surf->window, dri2_surf->buffer, fence_fd);
+ 
+    dri2_surf->buffer = NULL;
+@@ -217,9 +254,7 @@
+ droid_window_cancel_buffer(struct dri2_egl_surface *dri2_surf)
+ {
+    int ret;
+-   int fence_fd = dri2_surf->out_fence_fd;
+-
+-   dri2_surf->out_fence_fd = -1;
++   int fence_fd = pixel2_take_window_fence(dri2_surf);
+    ret = ANativeWindow_cancelBuffer(dri2_surf->window, dri2_surf->buffer,
+                                     fence_fd);
+    dri2_surf->buffer = NULL;
+@@ -1094,7 +1129,12 @@
+    if (!droid_load_driver(disp, swrast))
+       return EGL_FALSE;
+ 
++   /* On Android the allocator supplies scanout buffers. This EGL display has
++    * one render node for both DRI screen roles, including during the probe. */
++   struct dri2_egl_display *dri2_dpy = dri2_egl_display(disp);
++   dri2_dpy->fd_display_gpu = dri2_dpy->fd_render_gpu;
+    if (!dri2_create_screen(disp)) {
++      dri2_dpy->fd_display_gpu = -1;
+       _eglLog(_EGL_WARNING, "DRI2: failed to create screen");
+       droid_unload_driver(disp);
+       return EGL_FALSE;
+@@ -1119,7 +1159,7 @@
+    const unsigned node_type = swrast ? DRM_NODE_PRIMARY : DRM_NODE_RENDER;
+ #endif
+ 
+-   if (property_get("drm.gpu.vendor_name", vendor_buf, NULL) > 0)
++   if (property_get("vendor.drm.gpu.vendor_name", vendor_buf, NULL) > 0)
+       vendor_name = vendor_buf;
+ 
+    while (dev_list) {
+--- a/src/egl/meson.build
++++ b/src/egl/meson.build
+@@ -120,7 +120,7 @@
+   endif
+   if with_platform_android
+     deps_for_egl += [dep_android, idep_u_gralloc]
+-    files_egl += files('drivers/dri2/platform_android.c')
++    files_egl += files('drivers/dri2/platform_android.c', 'drivers/dri2/pixel2-linear-rgb.cpp')
+   endif
+ elif with_platform_haiku
+   c_args_for_egl += [
+--- a/src/gallium/drivers/panfrost/pan_screen.c
++++ b/src/gallium/drivers/panfrost/pan_screen.c
+@@ -40,6 +40,8 @@
+ #include "util/xmlconfig.h"
+ 
+ #include <fcntl.h>
++#include <sys/system_properties.h>
++#include <xf86drm.h>
+ 
+ #include "drm-uapi/drm_fourcc.h"
+ #include "drm-uapi/panfrost_drm.h"
+@@ -397,7 +399,7 @@
+       return 1;
+ 
+    case PIPE_CAP_NATIVE_FENCE_FD:
+-      return 1;
++      return pan_screen(screen)->pixel2_native_fences;
+ 
+    case PIPE_CAP_CONTEXT_PRIORITY_MASK:
+       return from_kmod_group_allow_priority_flags(
+@@ -955,6 +957,14 @@
+    screen->max_afbc_packing_ratio = debug_get_num_option(
+       "PAN_MAX_AFBC_PACKING_RATIO", DEFAULT_MAX_AFBC_PACKING_RATIO);
+    panfrost_open_device(screen, fd, dev);
++
++   /* Retain the Pixel 2 runtime opt-in until an entire boot has tested fences. */
++   char fence_property[PROP_VALUE_MAX];
++   uint64_t syncobj = 0;
++   screen->pixel2_native_fences =
++      __system_property_get("debug.panfrost.native_fence", fence_property) == 1 &&
++      fence_property[0] == '1' &&
++      drmGetCap(fd, DRM_CAP_SYNCOBJ, &syncobj) == 0 && syncobj != 0;
+ 
+    if (dev->debug & PAN_DBG_NO_AFBC)
+       dev->has_afbc = false;
+--- a/src/gallium/drivers/panfrost/pan_screen.h
++++ b/src/gallium/drivers/panfrost/pan_screen.h
+@@ -121,6 +121,7 @@
+    struct disk_cache *disk_cache;
+    unsigned max_afbc_packing_ratio;
+    bool force_afbc_packing;
++   bool pixel2_native_fences;
+    int force_afrc_rate;
+ 
+    struct {
