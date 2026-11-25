@@ -1,0 +1,55 @@
+{
+  "size": 33554432,
+  "empty_sha256": "408f840e62e234f702d079b02d5af443b6c175d0ce8ac8f1e0e26b3805850e03",
+  "full_sha256": "ed4ceac6b81ad0bc6238bd7ca4576a5fe384ac3a531b8239bd1f007a9989282e",
+  "directories": [
+    {
+      "offset": 81972,
+      "before": "off",
+      "after": "etc"
+    },
+    {
+      "offset": 81984,
+      "before": "pad",
+      "after": "app"
+    }
+  ],
+  "files": [
+    {
+      "path": "AT4K.apk",
+      "entry": "",
+      "size": 12272145,
+      "hash": "b2fa0343e903ad01c3854999dba70335ba4df5f5522dd931ed9d7189cf841a7d",
+      "dest": [
+        [
+          122880,
+          12272145
+        ]
+      ]
+    },
+    {
+      "path": "H700-wallpaper.jpg",
+      "entry": "res/raw/rgsp_wallpaper.jpg",
+      "size": 1324045,
+      "hash": "0d99ad08346620e240fa6eb7e765bb55996d4a311c8141a209626e08cad88997",
+      "dest": [
+        [
+          12398592,
+          1324045
+        ]
+      ]
+    },
+    {
+      "path": "lib/arm/libandroidx.graphics.path.so",
+      "entry": "lib/armeabi-v7a/libandroidx.graphics.path.so",
+      "size": 7252,
+      "hash": "41399eba6fc2a60f6f14642375c1824f3cf25eb8fec7397d753730a3ceda3e2b",
+      "dest": [
+        [
+          13733888,
+          7252
+        ]
+      ]
+    }
+  ]
+}

@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const firmwareURL = "https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases/download/v0.3.0/GKD-Pixel2-GammaOS.img.gz"
+const firmwareURL = "https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases/download/v0.3.1/GKD-Pixel2-GammaOS.img.gz"
 
 func OpenFirmware(ctx context.Context, size int64) (io.ReadCloser, error) {
 	c := webClient()
@@ -18,7 +18,7 @@ func OpenFirmware(ctx context.Context, size int64) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "GKD-Pixel2-Setup/0.3.0")
+	req.Header.Set("User-Agent", "GKD-Pixel2-Setup/0.3.1")
 	req.Header.Set("Accept-Encoding", "identity")
 	resp, err := c.Do(req)
 	if err != nil {

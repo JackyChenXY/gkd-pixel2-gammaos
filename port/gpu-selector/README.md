@@ -1,6 +1,6 @@
 # Pixel 2 graphics profiles and Windows setup
 
-The public card boots Mesa/Panfrost. The Windows assistant verifies the gzip download and the base image, fills the alternate vendor partition with the 11 pinned components on the user's computer, and marks it ready for use. First boot stays on Mesa. U-Boot consumes a Mali trial before starting the alternate kernel. Keeping a trial schedules later Mali boots, and `MESA.TXT` on the boot partition forces Mesa.
+For the current desktop packaging see the [AT4K OEM image guide](../desktop/at4k/README.md). The public card boots Mesa/Panfrost. The Windows assistant verifies the gzip download and the base image, fills the alternate vendor partition with the 11 pinned components on the user's computer, and marks it ready for use. First boot stays on Mesa. U-Boot consumes a Mali trial before starting the alternate kernel. Keeping a trial schedules later Mali boots, and `MESA.TXT` on the boot partition forces Mesa.
 
 ## Build the firmware
 

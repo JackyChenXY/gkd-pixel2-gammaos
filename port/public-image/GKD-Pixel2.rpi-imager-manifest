@@ -14,17 +14,17 @@
   "os_list": [
     {
       "name": "GammaOS · GKD Pixel 2",
-      "description": "Android 12 · Mesa/Panfrost · 手柄桌面",
-      "icon": "https://raw.githubusercontent.com/JackyChenXY/gkd-pixel2-gammaos/v0.3.0/docs/images/pixel2-boot.png",
-      "url": "https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases/download/v0.3.0/GKD-Pixel2-GammaOS.img.gz",
+      "description": "Android 12 · Mesa/Panfrost · Trebuchet",
+      "icon": "https://raw.githubusercontent.com/JackyChenXY/gkd-pixel2-gammaos/v0.3.1/docs/images/pixel2-boot.png",
+      "url": "https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases/download/v0.3.1/GKD-Pixel2-GammaOS.img.gz",
       "extract_size": 7516192768,
-      "extract_sha256": "44835475571d1b41fc9677a3feafb9a331769bfcbfa9a13d56853684f432d205",
-      "image_download_size": 693080436,
+      "extract_sha256": "9f812906ba7e7cc6f2cad8b256166795c6a92c63574b74060b2e7523c133e99e",
+      "image_download_size": 691988164,
       "release_date": "2026-11-26",
       "devices": [
         "gkd-pixel2"
       ],
-      "website": "https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases/tag/v0.3.0"
+      "website": "https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases/tag/v0.3.1"
     }
   ]
 }

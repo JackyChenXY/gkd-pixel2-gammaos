@@ -37,7 +37,7 @@ func Current() Release {
 }
 
 const ImageName = "GKD-Pixel2-GammaOS.img.gz"
-const PersonalName = "GKD-Pixel2-GammaOS-Mali.img"
+const PersonalName = "GKD-Pixel2-GammaOS-AT4K-Mali.img"
 const control = 319488*512 + slot.Offset
 const vendor = 641024 * 512
 
@@ -46,7 +46,7 @@ type change struct {
 	before, after []byte
 }
 
-func changes(source profile.Source) ([]change, error) {
+func changes(source profile.Source, apk []byte) ([]change, error) {
 	out := []change{{control, slot.Sector(slot.Blank), slot.Sector(slot.Ready)}}
 	for _, component := range profile.Board.Files {
 		data, err := source(component)
@@ -69,6 +69,11 @@ func changes(source profile.Source) ([]change, error) {
 			return nil, profile.ErrMismatch
 		}
 	}
+	desktop, err := desktopChanges(apk)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, desktop...)
 	sort.Slice(out, func(i, j int) bool { return out[i].offset < out[j].offset })
 	return out, nil
 }
@@ -119,8 +124,8 @@ func convert(input io.Reader, output io.Writer, size int64, patches []change) er
 }
 
 // Prepare verifies the compressed download, original image and final image, including all unchanged partitions.
-func Prepare(input io.Reader, output io.Writer, source profile.Source, release Release) error {
-	edits, err := changes(source)
+func Prepare(input io.Reader, output io.Writer, source profile.Source, apk []byte, release Release) error {
+	edits, err := changes(source, apk)
 	if err != nil {
 		return err
 	}

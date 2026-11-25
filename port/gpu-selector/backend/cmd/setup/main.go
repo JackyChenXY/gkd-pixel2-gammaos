@@ -49,7 +49,7 @@ func reusable(path string, size int64, digest string) (bool, error) {
 	return false, fmt.Errorf("此位置已有其他内容，请选择另一个输出文件夹：%s", path)
 }
 
-func newImage(ctx context.Context, base, pack, temp, dest string) error {
+func newImage(ctx context.Context, base, pack, at4k, temp, dest string) error {
 	r := card.Current()
 	say := func(s string) { fmt.Println(s) }
 	if pack == "" {
@@ -67,11 +67,15 @@ func newImage(ctx context.Context, base, pack, temp, dest string) error {
 	if err != nil {
 		return err
 	}
+	apk, err := online.Desktop(ctx, at4k, say)
+	if err != nil {
+		return err
+	}
 	var input io.ReadCloser
 	if base != "" {
 		input, err = os.Open(base)
 	} else {
-		say("正在从 GitHub 下载公开镜像并整合驱动。")
+		say("正在准备包含 AT4K、H700 壁纸和双驱动的镜像。")
 		input, err = online.OpenFirmware(ctx, r.GzipSize)
 	}
 	if err != nil {
@@ -84,7 +88,7 @@ func newImage(ctx context.Context, base, pack, temp, dest string) error {
 	}
 	defer out.Close()
 	meter := &progress{ctx: ctx, total: r.GzipSize, next: 10}
-	if err = card.Prepare(io.TeeReader(input, meter), out, src, r); err != nil {
+	if err = card.Prepare(io.TeeReader(input, meter), out, src, apk, r); err != nil {
 		return err
 	}
 	if err = out.Sync(); err != nil {
@@ -151,9 +155,9 @@ func manifest(image string, r card.Release) (string, error) {
 	}()
 	name := "GammaOS · GKD Pixel 2"
 	entry := map[string]any{
-		"name": name, "description": "Mesa + Mali · Android 12",
-		"icon":         "https://raw.githubusercontent.com/JackyChenXY/gkd-pixel2-gammaos/v0.3.0/docs/images/pixel2-boot.png",
-		"website":      "https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases/tag/v0.3.0",
+		"name": name, "description": "AT4K · Mesa + Mali · Android 12",
+		"icon":         "https://raw.githubusercontent.com/JackyChenXY/gkd-pixel2-gammaos/v0.3.1/docs/images/pixel2-boot.png",
+		"website":      "https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases/tag/v0.3.1",
 		"release_date": "2026-11-26", "url": imageURL(image),
 		"extract_size": r.Size, "extract_sha256": r.MaliSHA256, "image_download_size": r.Size,
 		"devices": []string{"gkd-pixel2"},
@@ -181,6 +185,7 @@ func run() error {
 	output := flag.String("out-dir", "", "输出文件夹，默认与安装助手同目录")
 	base := flag.String("base", "", "从本地读取本版公开 .img.gz")
 	pack := flag.String("pack", "", "从本地读取匹配的驱动 ZIP")
+	at4k := flag.String("at4k", "", "从本地读取 H700 AT4K 1.2 APK")
 	prepare := flag.Bool("prepare-only", false, "只生成镜像")
 	notices := flag.Bool("licenses", false, "显示许可与来源")
 	flag.Parse()
@@ -223,6 +228,12 @@ func run() error {
 		} else if _, err := os.Stat(*pack); err != nil {
 			return err
 		}
+		if *at4k == "" {
+			*at4k, err = beside(dir, online.LauncherName)
+			if err != nil {
+				return err
+			}
+		}
 		temp, err := os.MkdirTemp(dir, ".pixel2-")
 		if err != nil {
 			return err
@@ -231,11 +242,11 @@ func run() error {
 		defer os.RemoveAll(temp)
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer cancel()
-		if err = newImage(ctx, *base, *pack, temp, image); err != nil {
+		if err = newImage(ctx, *base, *pack, *at4k, temp, image); err != nil {
 			return err
 		}
 	}
-	fmt.Println("双驱动镜像校验通过", image)
+	fmt.Println("AT4K 双驱动镜像校验通过", image)
 	if *prepare {
 		return nil
 	}

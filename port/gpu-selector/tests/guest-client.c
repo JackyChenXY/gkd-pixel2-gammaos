@@ -58,6 +58,16 @@ int main(void){
     /* class_start core follows post-fs-data on this Android version. */
     for(int i=0; i<600 && access("/dev/socket/pixel2_gpu",F_OK)!=0; ++i) usleep(200000);
     if(access("/dev/socket/pixel2_gpu",F_OK)!=0)fail("service socket creation");
+    if (!strcmp(step,"preloaded") || !strcmp(step,"unconfirmed")) {
+        struct stat apk, wall;
+        const char *home = "/oem/app/AT4K/AT4K.apk";
+        const char *background = "/oem/app/AT4K/H700-wallpaper.jpg";
+        if (stat(home, &apk) || apk.st_size != 12272145 ||
+                stat(background, &wall) || wall.st_size != 1324045 ||
+                access("/oem/etc/preferred-apps/at4k-home.xml", R_OK))
+            fail("OEM desktop mount and default HOME");
+        dprintf(logfd,"<5>P2_DESKTOP %s mounted APK, wallpaper and HOME preference before framework startup\n",step);
+    }
     if(!strcmp(step,"seed") || !strcmp(step,"preloaded"))marker(NULL,"from-mesa");
     else if(!strcmp(step,"unconfirmed"))marker("from-mesa","from-mali");
     else marker("from-mali",NULL);

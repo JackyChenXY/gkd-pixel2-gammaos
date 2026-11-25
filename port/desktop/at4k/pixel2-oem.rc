@@ -1,0 +1,4 @@
+# The board boots both kernels from its first FAT partition. The previously
+# unused recovery partition holds the read-only OEM app directory on this build.
+on post-fs
+    mount ext4 /dev/block/by-name/recovery /oem ro nodev nosuid noatime context=u:object_r:oemfs:s0

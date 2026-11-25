@@ -39,7 +39,7 @@ def main():
                         "-o",str(current),a.commit],check=True)
         revision=subprocess.check_output(["git","-C",str(repo),"rev-parse",a.commit],text=True).strip()
         info=tmp/"README.txt"
-        info.write_text("GKD Pixel 2 GammaOS v0.3.0\nPort revision "+revision+
+        info.write_text("GKD Pixel 2 GammaOS v0.3.1\nPort revision "+revision+
                         "\nCurrent port and build instructions: port.tar.gz\n"+
                         "Kernel and boot sources: kernel/ and boot/\nAndroid component sources: sources/\n"+
                         "Mesa, libdrm and simulator compatibility sources: graphics/\n"+

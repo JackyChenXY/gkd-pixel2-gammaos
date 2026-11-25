@@ -2,6 +2,8 @@
 
 [下载、适用系统和手柄操作](../../docs/components.md)
 
+[AT4K 出厂桌面与 H700 原壁纸](at4k/README.md)
+
 ## Trebuchet / Quickstep
 
 从本项目的 [GammaOS 源码版本](../../docs/build.md) 开始。在完整 Android 源码根目录按此顺序应用四个补丁。先设置 `PORT` 为本移植仓库的绝对路径：

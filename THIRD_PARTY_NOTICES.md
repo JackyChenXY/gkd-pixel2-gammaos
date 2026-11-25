@@ -12,7 +12,7 @@
 - Trebuchet / Quickstep 继承 GammaOS、LineageOS 和 AOSP 的 Launcher3。发布附件随附对应构建的 [NOTICE](LICENSES/NOTICE-TrebuchetQuickStep.txt)。针对该版本的四个桌面补丁在 [desktop/trebuchet](port/desktop/trebuchet/)。
 - 开源 GPU 包包含 Mesa 24.3.4、libdrm 2.4.123 的上游源码、补丁和许可证。minigbm 头文件保留 Chromium OS 版权声明。许可按具体文件执行。[Mesa](https://archive.mesa3d.org/) · [libdrm](https://dri.freedesktop.org/libdrm/)
 - Pegasus 主题基于 Blood_roc 的 PegasusG by ROC v1.09。适配目录保留上游许可、商标条款和署名。[主题声明](port/desktop/pegasus-theme/NOTICE.zh-CN.md) · [上游](https://github.com/LPF970915/PegasusG-by-ROC/tree/91ed046e0b062f687636c93ed79e6cd8a673c7ff)
-- AT4K、H700 壁纸、官方 PPSSPP 和官方吉里吉里 APK 从各自上游获取。[H700Android](https://github.com/LPF970915/H700Android) · [PPSSPP](https://www.ppsspp.org/download/) · [吉里吉里发布页](https://github.com/2468785842/krkr2/releases)
+- Windows 助手从固定的 H700Android 提交下载原签名 AT4K 1.2，从同一 APK 读取 H700 壁纸和 ARM32 库，并校验每个文件。公开基础镜像使用 Trebuchet。官方 PPSSPP 和吉里吉里 APK 从各自上游获取。[H700Android](https://github.com/LPF970915/H700Android) · [PPSSPP](https://www.ppsspp.org/download/) · [吉里吉里发布页](https://github.com/2468785842/krkr2/releases)
 
 ## 整卡引导和 Android 用户空间
 

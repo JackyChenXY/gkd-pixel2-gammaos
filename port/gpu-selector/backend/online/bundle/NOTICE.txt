@@ -1,4 +1,4 @@
-GKD Pixel 2 — Windows card image assistant v0.3.0 for GammaOS v0.3.0
+GKD Pixel 2 — Windows card image assistant v0.3.1 for GammaOS v0.3.1
 
 The downloader and its release scripts are licensed under Apache-2.0. Go and
 third-party runtime license texts follow. The eight accompanying ARM32 files,
@@ -8,8 +8,11 @@ Windows build includes these notices. It obtains the original Mali EGL input
 and two Android init files directly from the TinkerBoard-Android repositories
 on the user's computer. Their respective upstream terms apply.
 
+The assistant retrieves the original signed AT4K 1.2 APK from H700Android. Its wallpaper and native library come from the same APK. Respective upstream terms apply.
+https://github.com/LPF970915/H700Android/tree/a8f95e13a91b7f8bd40f2fcb2bc246e3d1c13dc5/tools/at4k
+
 Source and notices:
-https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases/tag/v0.3.0
+https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases/tag/v0.3.1
 https://github.com/TinkerBoard-Android/rockchip-android-vendor-rockchip-common/tree/5aeb28df3d0275ccd579ef99e3c164dabde744e9/gpu/MaliTDVx
 
 ----- Runtime licensing (Go 1.27.4 at https://go.dev/dl/) -----

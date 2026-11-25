@@ -19,12 +19,12 @@ with tempfile.TemporaryDirectory(dir=args.output.parent) as temp:
     tree=t/"fixture";tree.mkdir();shutil.copy2(args.client,tree/"client");(tree/"client").chmod(0o755)
     shutil.copyfile(args.private_pack,tree/"driver.zip");(tree/"bad").write_text("invalid test input\n")
     fs=t/"fixture.img"
-    with fs.open("xb") as f:f.truncate(64<<20)
+    with fs.open("xb") as f:f.truncate(36<<20)
     run("mke2fs","-q","-F","-t","ext4","-b","4096","-O","none,ext_attr,dir_index,filetype,extent,sparse_super,large_file,huge_file,uninit_bg,dir_nlink,extra_isize","-d",tree,fs)
     with disk.open("r+b") as f:
         points=a.parts(f);start,size=a.extent(f,points["super"][0],0,"odm")
         if size!=odm.stat().st_size or a.digest(f,start,size)!=a.sha(args.odm):raise ValueError("Unexpected base ODM")
-        for (off,bound),src in (((start,size),odm),(points["recovery"],fs)):
+        for (off,bound),src in (((start,size),odm),(points["boot"],fs)):
             if src.stat().st_size>bound:raise ValueError("Fixture exceeds its partition")
             f.seek(off)
             with src.open("rb") as srcfile:shutil.copyfileobj(srcfile,f)
