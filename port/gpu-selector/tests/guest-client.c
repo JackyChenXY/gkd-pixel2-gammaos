@@ -17,6 +17,23 @@
 static int logfd;
 static const char *step;
 static void fail(const char *msg){dprintf(logfd,"<3>P2_GPUTEST FAIL %s %s errno=%d\n",step,msg,errno);exit(2);}
+static void check_handheld_defaults(void) {
+    const char *service = "/system/product/app/Pixel2PadNavigation/Pixel2PadNavigation.apk";
+    const char *library = "/system/product/app/Pixel2PadNavigation/lib/arm/libpadchord.so";
+    int hidden = 0;
+    int enabled = 0;
+    char line[512];
+    FILE *properties = fopen("/system/build.prop", "r");
+    if (!properties || access(service, R_OK) || access(library, R_OK))
+        fail("factory controller navigation components");
+    while (fgets(line, sizeof(line), properties)) {
+        hidden |= strcmp(line, "persist.sys.phh.mainkeys=1\n") == 0;
+        enabled |= strcmp(line, "ro.pixel2.handheld_navigation=1\n") == 0;
+    }
+    fclose(properties);
+    if (!hidden || !enabled)
+        fail("factory navigation defaults");
+}
 static int connect_gpu(void){
     struct sockaddr_un addr={.sun_family=AF_UNIX};
     strcpy(addr.sun_path,"/dev/socket/pixel2_gpu");
@@ -59,6 +76,7 @@ int main(void){
     for(int i=0; i<600 && access("/dev/socket/pixel2_gpu",F_OK)!=0; ++i) usleep(200000);
     if(access("/dev/socket/pixel2_gpu",F_OK)!=0)fail("service socket creation");
     if (!strcmp(step,"preloaded") || !strcmp(step,"unconfirmed")) {
+        check_handheld_defaults();
         struct stat apk, wall;
         const char *home = "/oem/app/AT4K/AT4K.apk";
         const char *background = "/oem/app/AT4K/H700-wallpaper.jpg";

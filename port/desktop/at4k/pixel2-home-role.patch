@@ -1,0 +1,17 @@
+--- a/packages/modules/Permission/PermissionController/src/com/android/permissioncontroller/role/model/HomeRoleBehavior.java
++++ b/packages/modules/Permission/PermissionController/src/com/android/permissioncontroller/role/model/HomeRoleBehavior.java
+@@ -80,6 +80,14 @@
+         int resolveInfosSize = resolveInfos.size();
+         for (int i = 0; i < resolveInfosSize; i++) {
+             ResolveInfo resolveInfo = resolveInfos.get(i);
++            // The personalized GKD Pixel 2 image preloads AT4K in its verified OEM slot.
++            // This fallback is consulted only when the user has no HOME role holder.
++            ApplicationInfo app = resolveInfo.activityInfo.applicationInfo;
++            if ("com.overdevs.at4k".equals(app.packageName)
++                    && (app.flags & ApplicationInfo.FLAG_SYSTEM) != 0
++                    && "/oem/app/AT4K/AT4K.apk".equals(app.sourceDir)) {
++                return app.packageName;
++            }
+ 
+             // Leave the fallback to PackageManagerService if there is only the fallback home in
+             // Settings, because if we fallback to it here, we cannot fallback to a normal home

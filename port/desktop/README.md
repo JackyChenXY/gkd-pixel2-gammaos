@@ -24,7 +24,7 @@ java -cp "$classes" com.android.quickstep.views.CheckMemoryCounters
 
 ## 全局手柄导航
 
-`pad-navigation` 包含 Android 无障碍服务、菜单、简体中文和英文资源，以及处理组合按键的原生库。在 Android 12 源码树的产品目录加入此模块，用 `m Pixel2PadNavigation` 构建 ARM32 APK。在设置中启用服务后才会收到过滤按键事件。原生输入层匹配的是 Pixel 2 内置手柄。
+`pad-navigation` 包含 Android 无障碍服务、菜单、简体中文和英文资源，以及处理组合按键的原生库。在 Android 12 源码树的产品目录加入此模块，用 `m Pixel2PadNavigation` 构建 ARM32 APK。v0.3.1 在首次创建用户时默认启用这项服务，之后尊重用户在无障碍设置里的选择。服务收到过滤按键后处理内置手柄组合键。原生输入层匹配的是 Pixel 2 内置手柄。
 
 ## 可选游戏前端
 

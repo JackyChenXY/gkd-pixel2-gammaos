@@ -1,0 +1,17 @@
+--- a/frameworks/base/packages/SettingsProvider/src/com/android/providers/settings/DatabaseHelper.java
++++ b/frameworks/base/packages/SettingsProvider/src/com/android/providers/settings/DatabaseHelper.java
+@@ -2323,6 +2323,14 @@
+             stmt = db.compileStatement("INSERT OR IGNORE INTO secure(name,value)"
+                     + " VALUES(?,?);");
+ 
++            // Seed the built-in controller menu when creating a Pixel 2 user. Subsequent
++            // changes are the user's accessibility preference and must remain untouched.
++            if (SystemProperties.getBoolean("ro.pixel2.handheld_navigation", false)) {
++                loadSetting(stmt, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
++                        "org.gkdpixel2.padnavigation/org.gkdpixel2.padnavigation.PadNavigationService");
++                loadSetting(stmt, Settings.Secure.ACCESSIBILITY_ENABLED, 1);
++            }
++
+             // Don't do this.  The SystemServer will initialize ADB_ENABLED from a
+             // persistent system property instead.
+             //loadSetting(stmt, Settings.Secure.ADB_ENABLED, 0);
