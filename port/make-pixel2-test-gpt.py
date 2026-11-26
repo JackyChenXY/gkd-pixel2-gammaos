@@ -19,6 +19,7 @@ ENTRY_SECTORS = ENTRY_BYTES // SECTOR
 GPT_HEADER_SIZE = 92
 GPT_BASIC_DATA = uuid.UUID("EBD0A0A2-B9E5-4433-87C0-68B6B72699C7")
 GPT_LINUX_DATA = uuid.UUID("0FC63DAF-8483-4772-8E79-3D69D8477DE4")
+GPT_LINUX_RESERVED = uuid.UUID("8DA63339-0007-60C0-C436-083AC8230908")
 
 
 def crc32(data: bytes) -> int:
@@ -89,7 +90,7 @@ def main() -> None:
         ("vbmeta", 1, GPT_LINUX_DATA),
         ("boot", 40, GPT_LINUX_DATA),
         ("recovery", 108, GPT_LINUX_DATA),
-        ("backup", 372, GPT_LINUX_DATA),
+        ("backup", 372, GPT_LINUX_RESERVED),
         ("cache", 384, GPT_LINUX_DATA),
         ("metadata", 16, GPT_LINUX_DATA),
         ("baseparameter", 1, GPT_LINUX_DATA),

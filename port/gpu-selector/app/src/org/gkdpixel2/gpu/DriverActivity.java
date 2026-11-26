@@ -47,7 +47,8 @@ public final class DriverActivity extends Activity {
     }
     private void ask(char action,int text) {
         new AlertDialog.Builder(this).setMessage(text).setNegativeButton(R.string.cancel,null)
-            .setPositiveButton(R.string.reboot,(d,w)->request(action,null,true)).show();
+            .setPositiveButton(action == 'T' ? R.string.powerOff : R.string.reboot,
+                (d,w)->request(action,null,true)).show();
     }
     private void pick() {
         picking=true;
@@ -74,7 +75,7 @@ public final class DriverActivity extends Activity {
             return new JSONObject(line);
         }
     }
-    private void request(char op,Uri uri,boolean reboot) {
+    private void request(char op,Uri uri,boolean applyNextBoot) {
         if(busy)return;
         busy=true;actions.removeAllViews();detail.setText(op=='I'?R.string.busy:R.string.loading);
         work.execute(()->{
@@ -91,11 +92,24 @@ public final class DriverActivity extends Activity {
                         "board".equals(why)?R.string.board:("state".equals(why)||"mounted".equals(why))?R.string.state:R.string.io);return;
                 }
                 render(result);
-                if(reboot){
-                    try{getSystemService(PowerManager.class).reboot(null);}catch(RuntimeException e){detail.setText(R.string.manual);}
-                }
+                if (applyNextBoot) applySelection(op);
             });
         });
+    }
+    private void applySelection(char action) {
+        boolean trial = action == 'T';
+        try {
+            if (trial) {
+                Intent powerOff = new Intent("com.android.internal.intent.action.REQUEST_SHUTDOWN");
+                powerOff.setClassName("android", "com.android.internal.app.ShutdownActivity");
+                powerOff.putExtra("android.intent.extra.USER_REQUESTED_SHUTDOWN", true);
+                startActivity(powerOff);
+            } else {
+                getSystemService(PowerManager.class).reboot(null);
+            }
+        } catch (RuntimeException e) {
+            detail.setText(trial ? R.string.manualShutdown : R.string.manual);
+        }
     }
     private void showError(int message) {
         detail.setText(message);actions.removeAllViews();button(R.string.retry,()->request('S',null,false));

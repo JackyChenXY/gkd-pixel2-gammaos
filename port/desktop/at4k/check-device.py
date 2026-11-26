@@ -27,8 +27,8 @@ def main():
             failures.append(label)
 
     version = shell("cat", "/system/etc/pixel2-release")
-    if version != "GKD Pixel 2 community TF image 0.3.1":
-        sys.exit("This checker expects the GKD Pixel 2 v0.3.1 image.")
+    if version not in ("GKD Pixel 2 community TF image 0.3.1", "GKD Pixel 2 community TF image 0.3.2"):
+        sys.exit("This checker expects a GKD Pixel 2 v0.3.1 or v0.3.2 desktop image.")
     check("Android boot completed", shell("getprop", "sys.boot_completed") == "1")
     check("Upstream AT4K is preinstalled",
           shell("pm", "path", "com.overdevs.at4k") == "package:/oem/app/AT4K/AT4K.apk")

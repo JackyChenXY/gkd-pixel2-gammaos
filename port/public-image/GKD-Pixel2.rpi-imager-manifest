@@ -15,16 +15,16 @@
     {
       "name": "GammaOS · GKD Pixel 2",
       "description": "Android 12 · Mesa/Panfrost · Trebuchet",
-      "icon": "https://raw.githubusercontent.com/JackyChenXY/gkd-pixel2-gammaos/v0.3.1/docs/images/pixel2-boot.png",
-      "url": "https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases/download/v0.3.1/GKD-Pixel2-GammaOS.img.gz",
+      "icon": "https://raw.githubusercontent.com/JackyChenXY/gkd-pixel2-gammaos/v0.3.2/docs/images/pixel2-boot.png",
+      "url": "https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases/download/v0.3.2/GKD-Pixel2-GammaOS.img.gz",
       "extract_size": 7516192768,
-      "extract_sha256": "95e6b744b9b3480b04bf0d54b58490829dcfd23209b21e02f61fa309d55fa556",
-      "image_download_size": 691931597,
+      "extract_sha256": "ec61a458333779226e29b43154054315103ed7d7404214929442fcf2ec1d080c",
+      "image_download_size": 695869673,
       "release_date": "2026-11-26",
       "devices": [
         "gkd-pixel2"
       ],
-      "website": "https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases/tag/v0.3.1"
+      "website": "https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases/tag/v0.3.2"
     }
   ]
 }

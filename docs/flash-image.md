@@ -18,10 +18,10 @@
 
 - 系统自动扩展数据分区，初始语言为简体中文。按功能键解锁。使用 Windows 助手生成的双驱动整卡时，首次出现「选择主屏幕应用」，请选择 **AT4K**，再选 **始终**。桌面会显示 H700 原壁纸。直接刷入公共基础镜像会进入 Trebuchet。
 - 屏幕右侧的三键导航栏默认隐藏。快速先按 R1、再点功能键可打开导航菜单。用十字键选择返回、桌面或最近任务，A 确认，B 退出。
-- 双驱动镜像初次使用 Mesa。要试用 Mali，在「设置 → 系统 → 图形驱动」选择「重启试用 Mali」。[确认保留和恢复方法](gpu-drivers.md)
+- 双驱动镜像初次使用 Mesa。要试用 Mali，在「设置 → 系统 → 图形驱动」选择「关机试用 Mali」。[确认保留和恢复方法](gpu-drivers.md)
 - 游戏由使用者导入。手柄导航、虚拟内存和吉里吉里兼容条件见[掌机功能说明](components.md)。
 - 固件为 Android 12 工程构建，使用测试签名和 SELinux permissive。USB 调试需要在设备上授权。
 
 ## 核对下载
 
-发行页的 `SHA256SUMS` 收录公开附件。助手在本机生成的双驱动镜像为 **7,516,192,768 字节**，SHA-256 为 `fc6bdd00578d110806937e0bb5ccfeccc67a2169e9513bdf6cbe9703694eaa8a`。[查看校验文件](https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases/latest/download/SHA256SUMS)
+发行页的 `SHA256SUMS` 收录公开附件。助手在本机生成的双驱动镜像为 **7,516,192,768 字节**，SHA-256 为 `2327fb2dc0d487ce13ec46e91f5b17f1e4ad7c531d27f2444ce157b700265bf3`。[查看校验文件](https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases/latest/download/SHA256SUMS)

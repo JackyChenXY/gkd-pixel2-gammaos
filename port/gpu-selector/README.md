@@ -1,6 +1,6 @@
 # Pixel 2 graphics profiles and Windows setup
 
-For the current desktop packaging see the [AT4K OEM image guide](../desktop/at4k/README.md). The public card boots Mesa/Panfrost. The Windows assistant verifies the gzip download and the base image, fills the alternate vendor partition with the 11 pinned components on the user's computer, and marks it ready for use. First boot stays on Mesa. U-Boot consumes a Mali trial before starting the alternate kernel. Keeping a trial schedules later Mali boots, and `MESA.TXT` on the boot partition forces Mesa.
+For the current desktop packaging see the [AT4K OEM image guide](../desktop/at4k/README.md). The public card boots Mesa/Panfrost. The Windows assistant verifies the gzip download and the base image, fills the alternate vendor partition with the 11 pinned components on the user's computer, and marks it ready for use. First boot stays on Mesa. U-Boot consumes a Mali trial before starting the alternate kernel. The settings app powers off after a successful trial request. Wait for the power LED to go out, disconnect USB, then power on. Keeping a trial schedules later Mali boots, and `MESA.TXT` on the boot partition forces Mesa.
 
 ## Build the firmware
 
@@ -31,3 +31,5 @@ python3 tests/boot-policy.py
 `backend/card/release.json` records the released compressed, uncompressed and locally integrated image digests. Use `Pixel2-Setup.exe --prepare-only` for image-only production, optionally with `--out-dir`, `--base` and `--pack`. With no switches the assistant opens Raspberry Pi Imager's graphical device selector. The helper only writes regular files. The physical write and readback are performed by Imager after the user chooses a card and confirms.
 
 The guest fixture exercises the shipping Android service at system UID. From a disposable preloaded image, run `tests/virtual-card.py` and then `tests/run-boots.py` with the steps `preloaded unconfirmed fallback confirm persistent return`. GPU rendering and display output need physical hardware.
+
+For the v0.3.2 card, follow the reserved-slot build in the [desktop image guide](../desktop/at4k/README.md). Run `tests/reserved-slot.py` against both complete images. On real hardware `tests/check-device-slot.py --expect trial` checks the renderer, vendor mount and portable-storage exclusion.

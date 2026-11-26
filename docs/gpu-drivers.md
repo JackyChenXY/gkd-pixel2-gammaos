@@ -4,16 +4,22 @@ Windows 安装助手会把 Mesa 和匹配的 Rockchip/Arm Mali-G31 用户态驱�
 
 ## 试用 Mali
 
-1. 保存当前游戏，进入 **设置 → 系统 → 图形驱动**。双驱动整卡会显示「已校验 Mali 驱动，可以试用」。
-2. 选择 **重启试用 Mali**。启动到桌面后，确认画面、按键和游戏运行正常，再回到这页点 **保留 Mali**。
+1. 保存当前游戏，进入 **设置 → 系统 → 图形驱动**。双驱动整卡会显示 Mali 已安装，试用前会核对完整驱动区。
+2. 选择 **关机试用 Mali**，在确认框点 **关机**。等电源灯熄灭后拔下 USB，约 10 秒后按电源键开机。启动到桌面后，确认画面、按键和游戏运行正常，再回到这页点 **保留 Mali**。
 3. 要返回 Mesa，点 **重启回到 Mesa**。两种模式使用同一份应用、设置和游戏存档。
 
 试用时若黑屏，将掌机完全关机后再开机，会回到 Mesa。需要强制恢复时，在电脑可见的启动分区根目录新建空文件 `MESA.TXT`，再将卡插回掌机开机。进入设置将 Mesa 设为默认后，可以删除该文件。
 
+## v0.3.1 提示「驱动槽与本版本校验值不符」
+
+v0.3.1 的启动卡把备用驱动分区标成通用 Linux 文件系统。实机首次开机后，Android 会把它作为便携存储挂载，创建 `Music`、`Download` 等目录并改变文件系统元数据。即使 11 个驱动文件仍然正确，设置也会在重启前拒绝整区校验。单独重新下载驱动 ZIP 无法清除这些改动。
+
+v0.3.2 把该分区标为系统保留。已有数据的 v0.3.1 卡，整卡重刷前需先保存应用数据和游戏存档。已扩容的卡也可通过电脑读卡器单独修复两份分区表和备用驱动区。局部修复必须先确认卡的身份，并核对驱动区是否被用户当成存储空间使用。公开 Mesa 镜像与个人双驱动镜像的驱动区内容不同，各自须与对应版本的完整驱动区校验值匹配。
+
 ## 驱动来源
 
-公开整卡随附 Mesa 和 Mali 对应的内核。安装助手在用户电脑上，直接从固定的上游提交取得 Android ARM32 Mali 主库及两个启动配置，配合八个公开配套文件。全部 11 项、驱动分区和生成的整卡都必须通过 SHA-256 校验。这个固定版本的 SDK 主库未附可核实的镜像再分发授权，因此 GitHub 提供公开基础镜像、安装助手和配套组件。[上游主库与固定版本](https://github.com/TinkerBoard-Android/rockchip-android-vendor-rockchip-common/tree/5aeb28df3d0275ccd579ef99e3c164dabde744e9/gpu/MaliTDVx) · [11 项校验清单](../port/gpu-selector/reference.json) · [配套组件和声明](https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases/download/v0.3.1/Pixel2-Mali-Support.zip)
+公开整卡随附 Mesa 和 Mali 对应的内核。安装助手在用户电脑上，直接从固定的上游提交取得 Android ARM32 Mali 主库及两个启动配置，配合八个公开配套文件。全部 11 项、驱动分区和生成的整卡都必须通过 SHA-256 校验。这个固定版本的 SDK 主库未附可核实的镜像再分发授权，因此 GitHub 提供公开基础镜像、安装助手和配套组件。[上游主库与固定版本](https://github.com/TinkerBoard-Android/rockchip-android-vendor-rockchip-common/tree/5aeb28df3d0275ccd579ef99e3c164dabde744e9/gpu/MaliTDVx) · [11 项校验清单](../port/gpu-selector/reference.json) · [配套组件和声明](https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases/download/v0.3.2/Pixel2-Mali-Support.zip)
 
-已刷公开 Mesa 版且有匹配驱动 ZIP 的用户，可将 `Pixel2-Mali.local.zip` 复制到掌机的「下载」，在图形驱动设置中点「导入本地驱动」，然后重启试用。该 ZIP 为 28,716,111 字节，SHA-256 为 `9bb7a89a1d6875df1c1a25c74baed814f5b959099883c8beb5204dec5bbdc686`。使用 Windows 助手刷出的双驱动镜像可以直接从第一步试用。
+已刷公开 Mesa 版且有匹配驱动 ZIP 的用户，可将 `Pixel2-Mali.local.zip` 复制到掌机的「下载」，在图形驱动设置中点「导入本地驱动」，然后选择「关机试用 Mali」。该 ZIP 为 28,716,111 字节，SHA-256 为 `9bb7a89a1d6875df1c1a25c74baed814f5b959099883c8beb5204dec5bbdc686`。使用 Windows 助手刷出的双驱动镜像可以直接从第一步试用。
 
 系统同时选择对应的内核、EGL、图形缓冲分配和显示合成服务。针对吉里吉里 OpenGL 的 Mesa 修正仅在 Mesa 模式生效。[当前测试范围](validation.md)

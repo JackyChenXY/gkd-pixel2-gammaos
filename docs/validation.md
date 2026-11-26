@@ -19,6 +19,18 @@
 
 与该掌机系统匹配的镜像在独立虚拟卡上验证了四次启动。TF 交换区依次为关闭、优先级 10、优先级 100、优先级 100。设置在重启后生效，zRAM 全程保持优先级 100，四次关机均正常卸载数据卷。
 
+## v0.3.2 驱动槽和 Mali 冷启动
+
+在 119 GiB 实机卡上，旧版第一次进入 Mesa 后，Android 把第 10 分区当作便携存储挂载并创建了 12 个媒体目录。驱动所需的 11 个文件全部正确，但 128 MiB 分区中有 23 个 4 KiB 块被改动。将这一分区标为系统保留并恢复其完整内容后，默认 Mesa 正常启动，存储管理器不再列出该分区。试用前后的完整驱动分区 SHA-256 均为 `ed51573d66661ca97d139ef17ceeaf986d7b2c953abf354cec035b1bf64e55c0`。
+
+同一台实机从 Mesa 热重启试用时出现过黑屏。引导程序读入了内核、设备树和启动文件，三项 CRC 都正确。保留相同文件，从完全关机状态启动后，Android 报告 `ro.boot.pixel2gpu=trial`、`sys.boot_completed=1`。AT4K 位于前台，SurfaceFlinger 报告 **ARM, Mali-G31, OpenGL ES 3.2**，`/vendor` 的实际设备为只读的 `179:10`。同一张卡跑 Mesa 时，SurfaceFlinger 报告 **Mesa, Mali-G31 (Panfrost), OpenGL ES 3.1 Mesa 24.3.4**，使用只读的逻辑 vendor 分区。热启动时具体是哪一项硬件状态导致停住，尚未确定。
+
+Windows 安装助手和独立组装流程生成的 v0.3.2 双驱动整卡均为 7 GiB，SHA-256 为 `2327fb2dc0d487ce13ec46e91f5b17f1e4ad7c531d27f2444ce157b700265bf3`。在 ARM 虚拟卡上依次验证默认 Mesa、一次性试用 Mali、未确认后回退 Mesa、再次试用、保留 Mali 并再次启动，以及从保留状态返回 Mesa。这六次检查覆盖切换逻辑。实际图形渲染器由掌机上的 SurfaceFlinger 核对。
+
+用 Windows 助手生成的最终镜像全新刷写了一张 119 GiB TF 卡。从读卡器重新打开设备，读回全部 7,516,192,768 字节，SHA-256 与上面的整卡一致，两份分区表也通过校验。该次全新安装的掌机验收结果见[版本发布说明](https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases/tag/v0.3.2)。
+
+开启 USB 调试后可在电脑运行 `python3 port/gpu-selector/tests/check-device-slot.py --expect trial`，同时核对启动模式、只读挂载、便携存储列表和实际渲染器。验证默认 Mesa 时改用 `--expect mesa`。
+
 ## v0.3.1 AT4K 双驱动镜像
 
 最初的候选版在 119 GiB 卡上启动后同时列出了 AT4K 和 Trebuchet。实机读数显示手柄辅助服务尚未启用，导航栏处于显示状态。修正版在系统主屏角色与新用户初始设置中处理这两项缺省值。AT4K 保留原 APK 签名，系统壁纸与 H700 安装包中的原图逐字节相同。

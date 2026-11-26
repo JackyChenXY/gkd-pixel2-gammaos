@@ -32,3 +32,22 @@ python3 build-card.py --kind desktop --base "$OLD_DUAL_IMG" --oem "$WORK/oem-ful
 ```
 
 基础镜像的 OEM 文件占位区为零，安卓只会扫描个人镜像上已激活的应用目录。制作新的发布版时，用该次构建得到的区段清单、压缩镜像和整卡校验值编译 Windows 助手。助手在用户电脑上补入 APK、壁纸和原生库，并在输出前核对整卡。生成的个人镜像可以直接用 Raspberry Pi Imager 刷入 TF 卡。
+
+## 生成带保留驱动区的 v0.3.2 整卡
+
+本次更新在 TF 卡分区表中保留驱动区，并更新两套首次扩容程序、图形驱动设置和系统版本标识。先按上节生成 v0.3.1 的普通镜像文件，再运行以下步骤。也可解压 v0.3.1 的公开下载，使用其原始 `.img`。请在具备 mtools、gdisk、Python 3、GNU cp 和 AArch64 musl 交叉编译器的 Linux 环境构建。发布构建使用 GCC Linaro 6.3.1 和 musl 1.2.5。编译器需能逐字节重建 v0.3.1 的 `p2-init`。
+
+```sh
+cd "$PORT/port/gpu-selector"
+bash build-tools.sh "$GAMMA" "$GOROOT" "$WORK/gpu-tools"
+python3 cold-system.py --baseline "$WORK/system.img" --gamma "$GAMMA" \
+  --apk "$WORK/gpu-tools/Pixel2GpuSelector.apk" --output "$WORK/system-032.img"
+python3 reserve-card.py --base "$WORK/public.img" --system "$WORK/system-032.img" --musl-cc "$MUSL_CC" \
+  --kernel-headers "$KERNEL_HEADERS" --output "$WORK/public-reserved.img"
+python3 reserve-card.py --base "$WORK/desktop.img" --system "$WORK/system-032.img" --musl-cc "$MUSL_CC" \
+  --kernel-headers "$KERNEL_HEADERS" --output "$WORK/desktop-reserved.img"
+python3 tests/reserved-slot.py "$WORK/public-reserved.img"
+python3 tests/reserved-slot.py "$WORK/desktop-reserved.img"
+```
+
+程序核实两份 GPT，仅将第 10 分区 `backup` 标为 Linux reserved，以免 Android 将驱动槽作为便携存储挂载。两种驱动的启动程序都使用新分区表的校验值来验证首次扩容。128 MiB 驱动槽仍按原有 SHA-256 做完整校验。脚本只接受指定版本的普通镜像文件。

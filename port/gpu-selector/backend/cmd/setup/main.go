@@ -156,8 +156,8 @@ func manifest(image string, r card.Release) (string, error) {
 	name := "GammaOS · GKD Pixel 2"
 	entry := map[string]any{
 		"name": name, "description": "AT4K · Mesa + Mali · Android 12",
-		"icon":         "https://raw.githubusercontent.com/JackyChenXY/gkd-pixel2-gammaos/v0.3.1/docs/images/pixel2-boot.png",
-		"website":      "https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases/tag/v0.3.1",
+		"icon":         "https://raw.githubusercontent.com/JackyChenXY/gkd-pixel2-gammaos/v0.3.2/docs/images/pixel2-boot.png",
+		"website":      "https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases/tag/v0.3.2",
 		"release_date": "2026-11-26", "url": imageURL(image),
 		"extract_size": r.Size, "extract_sha256": r.MaliSHA256, "image_download_size": r.Size,
 		"devices": []string{"gkd-pixel2"},

@@ -1,18 +1,18 @@
 <resources>
     <string name="title">图形驱动</string>
-    <string name="summary">选择重启后系统使用的图形驱动。</string>
+    <string name="summary">选择下次开机时使用的图形驱动。</string>
     <string name="mesa">Mesa / Panfrost</string>
     <string name="mali">Rockchip / Arm Mali</string>
     <string name="current">当前驱动：%1$s</string>
     <string name="empty">Mesa 已可使用。也可从「下载」导入本版匹配的 Mali 驱动 ZIP。</string>
-    <string name="ready">已校验 Mali 驱动，可以试用。</string>
+    <string name="ready">Mali 驱动已安装，试用前会校验完整驱动区。</string>
     <string name="trial">正在试用 Mali。确认桌面显示和手柄正常后，请在重启前选择「保留 Mali」。</string>
     <string name="kept">后续启动已选用 Mali。</string>
     <string name="fallback">上次 Mali 启动未确认，已恢复 Mesa。可重新试用，或将 Mesa 设为默认。</string>
     <string name="queued">驱动选择将在下次开机时生效。</string>
     <string name="forced">启动分区上有 MESA.TXT。此文件存在时会始终启动 Mesa。</string>
     <string name="broken">驱动选择记录需要修复。请在 Mesa 下重新导入匹配文件。</string>
-    <string name="use">重启试用 Mali</string>
+    <string name="use">关机试用 Mali</string>
     <string name="keep">保留 Mali</string>
     <string name="restore">将 Mesa 设为默认</string>
     <string name="restartMesa">重启回到 Mesa</string>
@@ -21,14 +21,16 @@
     <string name="loading">正在读取驱动状态…</string>
     <string name="reboot">重启</string>
     <string name="cancel">取消</string>
-    <string name="tryBody">重启会关闭运行中的应用。若这次试用黑屏，将掌机完全关机后再开机即可回到 Mesa。</string>
+    <string name="tryBody">掌机会先校验驱动，再关闭应用并关机。电源灯熄灭后拔下 USB，等约 10 秒，再按电源键试用 Mali。</string>
     <string name="mesaBody">运行中的应用会关闭，掌机将以 Mesa 开机。</string>
     <string name="retry">刷新</string>
     <string name="file">请选择与本版 Pixel 2 镜像匹配的驱动 ZIP。</string>
-    <string name="integrity">驱动槽与本版本校验值不符。请从 Mesa 重新导入；若仍失败，请核对卡上镜像。</string>
+    <string name="integrity">Mali 驱动区未通过完整性校验，系统会继续使用 Mesa。请按项目的「图形驱动」说明检查当前卡。</string>
     <string name="board">无法访问 Pixel 2 驱动服务或本版本的启动卡。</string>
     <string name="state">当前状态无法执行此操作。请刷新并查看当前驱动。</string>
     <string name="io">操作未完成，请检查 TF 卡后重试。</string>
     <string name="manual">选择已保存，请从电源菜单重启生效。</string>
     <string name="systemCheck">图形驱动设置</string>
+    <string name="powerOff">关机</string>
+    <string name="manualShutdown">已安排下次试用 Mali。请从电源菜单关机，灯灭后拔下 USB，再按电源键开机。</string>
 </resources>

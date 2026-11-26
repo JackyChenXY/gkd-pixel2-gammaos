@@ -1,18 +1,18 @@
 <resources>
     <string name="title">Graphics driver</string>
-    <string name="summary">Choose the graphics driver used by the system after restart.</string>
+    <string name="summary">Choose the graphics driver for the next boot.</string>
     <string name="mesa">Mesa / Panfrost</string>
     <string name="mali">Rockchip / Arm Mali</string>
     <string name="current">Current driver: %1$s</string>
     <string name="empty">Mesa is ready. To add Mali to this installation, select the matching driver ZIP from Downloads.</string>
-    <string name="ready">The verified Mali driver is available.</string>
+    <string name="ready">Mali is installed. The complete driver slot will be verified before the trial.</string>
     <string name="trial">Mali is on trial. If the desktop looks right and the controller works, choose Keep Mali before restarting.</string>
     <string name="kept">Mali is selected for future boots.</string>
     <string name="fallback">Mesa has resumed after an unconfirmed Mali boot. You can try again or select Mesa as default.</string>
     <string name="queued">A change is queued for the next boot.</string>
     <string name="forced">The boot card has MESA.TXT. Mesa is forced while this file exists.</string>
     <string name="broken">The driver selection record needs repair. Import the matching files again from Mesa.</string>
-    <string name="use">Restart and try Mali</string>
+    <string name="use">Power off to try Mali</string>
     <string name="keep">Keep Mali</string>
     <string name="restore">Use Mesa by default</string>
     <string name="restartMesa">Restart to Mesa</string>
@@ -21,14 +21,16 @@
     <string name="loading">Reading driver status…</string>
     <string name="reboot">Restart</string>
     <string name="cancel">Cancel</string>
-    <string name="tryBody">This closes running apps. If this trial fails, switch the handheld fully off and start it again to return to Mesa.</string>
+    <string name="tryBody">The handheld will verify the driver, close apps and power off. When the power light goes out, disconnect USB, wait about ten seconds and press Power to try Mali.</string>
     <string name="mesaBody">Running apps will close and the handheld will start with Mesa.</string>
     <string name="retry">Refresh</string>
     <string name="file">Select the driver ZIP for this Pixel 2 release.</string>
-    <string name="integrity">The installed driver slot did not match this release. Boot Mesa and re-import. If this continues, verify the card image.</string>
+    <string name="integrity">The Mali driver slot failed its integrity check. Mesa remains selected. See the project graphics driver guide to check this card.</string>
     <string name="board">The Pixel 2 driver service or its verified boot card is unavailable.</string>
     <string name="state">This action is unavailable in the current mode. Refresh and check the current driver.</string>
     <string name="io">The operation could not finish. Check the TF card and try again.</string>
     <string name="manual">Selection saved. Restart with the system power menu to apply it.</string>
     <string name="systemCheck">Graphics driver settings</string>
+    <string name="powerOff">Power off</string>
+    <string name="manualShutdown">Mali is queued. Use the power menu to turn off, disconnect USB after the light goes out, then press Power.</string>
 </resources>

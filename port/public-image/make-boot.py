@@ -17,8 +17,11 @@ spec=importlib.util.spec_from_file_location("pixel2_ramdisk",port/"diagnostics/b
 ramdisk=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ramdisk)
 p=argparse.ArgumentParser(description=__doc__)
-for name in ("gpt","musl-cc","kernel-headers","base-ramdisk","output"):
+for name in ("gpt","musl-cc","kernel-headers","output"):
     p.add_argument("--"+name,type=Path,required=True)
+mode=p.add_mutually_exclusive_group(required=True)
+mode.add_argument("--base-ramdisk",type=Path,help="Base vendor ramdisk for a full U-Boot image")
+mode.add_argument("--init-only",action="store_true",help="Output just the board-specific executable")
 a=p.parse_args()
 layout=json.loads((a.gpt/"partition-layout.json").read_text())
 parts={part["name"]:part for part in layout["partitions"]}
@@ -47,6 +50,10 @@ with tempfile.TemporaryDirectory(dir=a.output.parent) as temporary:
     elf=binary.read_bytes()
     assert elf[:5]==b"\x7fELF\x02" and struct.unpack_from("<H",elf,18)[0]==183
     assert guid.bytes_le in elf and str(guid).encode() in elf
+    if a.init_only:
+        with a.output.open("xb") as out:
+            out.write(elf)
+        raise SystemExit(0)
     base=work/"base.uimg"
     base.write_bytes(ramdisk.legacy_ramdisk(gzip.decompress(a.base_ramdisk.read_bytes()),b"Pixel 2 board ramdisk"))
     archive=ramdisk.append_android_probe(elf,base,standalone=True)
