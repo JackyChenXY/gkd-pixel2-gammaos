@@ -9,6 +9,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--adb", default="adb")
     parser.add_argument("--serial", help="ADB serial number instead of the attached USB device")
+    parser.add_argument("--expect-saved-home", action="store_true",
+                        help="Require AT4K to have been saved with Always")
     args = parser.parse_args()
     device = [args.adb, "-s", args.serial] if args.serial else [args.adb, "-d"]
 
@@ -32,7 +34,16 @@ def main():
           shell("pm", "path", "com.overdevs.at4k") == "package:/oem/app/AT4K/AT4K.apk")
     home = shell("cmd", "package", "resolve-activity", "--brief", "--user", "0",
                  "-a", "android.intent.action.MAIN", "-c", "android.intent.category.HOME")
-    check("HOME resolves directly to AT4K", home.splitlines()[-1:] == ["com.overdevs.at4k/.MainActivity"])
+    component = home.splitlines()[-1] if home else ""
+    at4k = "com.overdevs.at4k/.MainActivity"
+    if component == "android/com.android.internal.app.ResolverActivity" and not args.expect_saved_home:
+        candidates = shell("cmd", "package", "query-activities", "--brief", "--user", "0",
+                           "-a", "android.intent.action.MAIN", "-c", "android.intent.category.HOME")
+        check("AT4K is available in the first-boot Home chooser",
+              at4k in [line.strip() for line in candidates.splitlines()])
+        print("INFO To save the default Home, select AT4K and choose Always.")
+    else:
+        check("Saved HOME resolves to AT4K", component == at4k)
     wallpaper = "/oem/app/AT4K/H700-wallpaper.jpg"
     check("H700 default wallpaper is selected", shell("getprop", "ro.config.wallpaper") == wallpaper)
     check("Original wallpaper matches",

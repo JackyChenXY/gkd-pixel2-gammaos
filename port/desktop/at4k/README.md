@@ -2,7 +2,7 @@
 
 Windows 助手使用 H700Android 提交 `a8f95e13a91b7f8bd40f2fcb2bc246e3d1c13dc5` 的原签名 AT4K 1.2。APK 的包名是 `com.overdevs.at4k`，SHA-256 为 `b2fa0343e903ad01c3854999dba70335ba4df5f5522dd931ed9d7189cf841a7d`。系统壁纸来自 APK 内的 `res/raw/rgsp_wallpaper.jpg`，SHA-256 为 `0d99ad08346620e240fa6eb7e765bb55996d4a311c8141a209626e08cad88997`。[固定上游](https://github.com/LPF970915/H700Android/tree/a8f95e13a91b7f8bd40f2fcb2bc246e3d1c13dc5/tools/at4k)
 
-双驱动镜像在此前空置的 recovery 分区存放只读 OEM 文件系统。安卓在扫描应用前将它挂到 `/oem`，原签名应用位于 `/oem/app/AT4K`，并使用 ARM32 原生库。`/oem/etc/preferred-apps/at4k-home.xml` 提供新用户的首选主屏，`ro.config.wallpaper` 指定系统默认壁纸。后续自行更换桌面或壁纸时沿用安卓的用户设置。两种驱动共用这些文件，最近任务由原有 Quickstep 提供。PermissionController 在主屏角色空缺时优先选择只读 OEM 分区中的原版 AT4K。SettingsProvider 在新建用户时写入内置手柄导航的初始设置。以后手动换桌面或关闭服务，系统会保留选择。GammaOS 的实体键属性 `persist.sys.phh.mainkeys=1` 隐藏右侧三键栏。
+双驱动镜像在此前空置的 recovery 分区存放只读 OEM 文件系统。安卓在扫描应用前将它挂到 `/oem`，原签名应用位于 `/oem/app/AT4K`，并使用 ARM32 原生库。`/oem/etc/preferred-apps/at4k-home.xml` 提供新用户的首选主屏，`ro.config.wallpaper` 指定系统默认壁纸。后续自行更换桌面或壁纸时沿用安卓的用户设置。两种驱动共用这些文件，最近任务由原有 Quickstep 提供。PermissionController 在主屏角色空缺时把 OEM 分区内的 AT4K 作为优先候选。实机首次解锁仍显示 Android 主屏选择器，在其中选 AT4K，再点「始终」保存。SettingsProvider 在新建用户时写入内置手柄导航的初始设置。以后手动换桌面或关闭服务，系统会保留选择。GammaOS 的实体键属性 `persist.sys.phh.mainkeys=1` 隐藏右侧三键栏。
 
 ## 从 v0.3.0 构建
 
