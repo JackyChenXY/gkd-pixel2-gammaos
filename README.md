@@ -27,4 +27,4 @@ Windows、macOS 和 Linux 都可以把公开的 `.img.gz` 原样刷入 TF 卡，
 - 出厂已开启 Pixel 2 手柄导航，并隐藏屏幕右侧的三键栏。先按 R1，随即点功能键即可呼出返回、桌面和最近任务菜单。可以在「设置 → 无障碍」关闭或重新启用。
 - 在「设置 → 系统 → 虚拟内存」可开启额外 2 GiB TF 卡交换空间，重启生效。
 
-[实机记录与验证范围](docs/validation.md) · [模拟器兼容条件](docs/components.md) · [构建说明](docs/build.md) · [第三方许可](THIRD_PARTY_NOTICES.md)
+[实机记录与验证范围](docs/validation.md) · [PPSSPP 与吉里吉里推荐设置](docs/components.md#模拟器推荐设置) · [构建说明](docs/build.md) · [第三方许可](THIRD_PARTY_NOTICES.md)

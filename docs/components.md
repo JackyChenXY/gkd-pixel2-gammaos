@@ -17,8 +17,17 @@ Windows 助手生成的镜像预装 AT4K 1.2，使用 H700 默认壁纸。首次
 
 Mesa 24.3.4 / Panfrost 为 Mali-G31 提供系统 EGL 和 OpenGL ES 3.1。实机已冷启动到桌面，系统合成器、设置和 Trebuchet 都加载这套驱动。相同条件下，两轮原版 glmark2 的分数由 220、224 提升至 255、251。测试时使用原生分辨率、USB 供电和 400–520 MHz 按需调频。仓库保留较早的 Mesa、合成和频率实验，便于复核各项改动。[构建、图形正确性检查和跑分](../port/open-variant/vendor/pixel2-system-gpu/) · [历史实验和测量程序](../port/open-variant/graphics-trials/)
 
+## 模拟器推荐设置
+
+| 游戏与模拟器 | GKD Pixel 2 上的建议 |
+| --- | --- |
+| 《英雄传说：空之轨迹 FC》 · 官方 PPSSPP 1.20.4 | 使用 Windows 助手生成的双驱动镜像时，可在「设置 → 系统 → 图形驱动」试用 Arm Mali。PPSSPP 选 OpenGL、1 倍 PSP 分辨率，关闭跳帧和自动跳帧。开场室内推进对话时，Mali 的模拟速度中位数为 98.9%，Mesa 为 59.6%。 |
+| 《千恋＊万花》 · 官方吉里吉里 1.4.4 | 在该游戏的单独配置里选择软件渲染（`renderer=software`），然后退出模拟器并重新打开游戏。Mesa 和 Arm Mali 下均实测可推进第一章芦花的对话。Arm Mali 的 OpenGL 测试显示了芦花立绘，随后在对话中因内存压力退出。 |
+
+测试时已开启 2 GiB TF 交换区，zRAM 与 TF 卡的优先级均为 100。[虚拟内存设置](build.md#配置-2-gib-存储卡交换区) · [实测条件与结果](validation.md#模拟器实测) · [驱动切换与黑屏回退](gpu-drivers.md) · [官方 PPSSPP 下载](https://www.ppsspp.org/download/)
+
 ## 官方吉里吉里 OpenGL 兼容修复
 
 实机使用官方版 1.4.4，系统按包名、APK 散列、安装 UID 和板级驱动布局选择专用的 Mesa 资源分配路径。独立的游戏配置在包内 `krkr2/game-profile.xml`。参考机上《千恋＊万花》已用官方 APK 从图标启动，并由用户验证自动模式能继续推进剧情。测试范围为这台掌机和已跑过的剧情。[上游 APK](https://github.com/2468785842/krkr2/releases) · [系统修复源码与清单](../port/open-variant/krkr2/)
 
-**安装条件很重要。** 此版预编译组件校验 UID `10117` 和官方 APK 的 SHA-256 `e42f4c8a0468627e5fc6e40da0af7fa80fa9ee3c3a809d8f0d062a0c3923ffc2`。在不同安装顺序的系统上，Android 可能分配另一个 UID，兼容路径会回退。维护者可在掌机上用 `adb shell pm list packages -U org.github.krkr2` 检查。压缩包内说明给出了基线哈希、离线组装命令和验证方法。[官方 PPSSPP](https://www.ppsspp.org/download/) 直接从其上游下载。
+**安装条件很重要。** 此版预编译组件校验 UID `10117` 和官方 APK 的 SHA-256 `e42f4c8a0468627e5fc6e40da0af7fa80fa9ee3c3a809d8f0d062a0c3923ffc2`。在不同安装顺序的系统上，Android 可能分配另一个 UID，兼容路径会回退。维护者可在掌机上用 `adb shell pm list packages -U org.github.krkr2` 检查。压缩包内说明给出了基线哈希、离线组装命令和验证方法。
