@@ -29,6 +29,8 @@ Windows 安装助手和独立组装流程生成的 v0.3.2 双驱动整卡均为 
 
 用 Windows 助手生成的最终镜像全新刷写了一张 119 GiB TF 卡。从读卡器重新打开设备，读回全部 7,516,192,768 字节，SHA-256 与上面的整卡一致，两份分区表也通过校验。该次全新安装的掌机验收结果见[版本发布说明](https://github.com/JackyChenXY/gkd-pixel2-gammaos/releases/tag/v0.3.2)。
 
+这张全新刷写的卡首次使用 Mesa。正式版引导的两次 Mali 冷启动试用中，第一次持续黑屏，随后实测回到 Mesa。两次之间临时加入引导日志，成功进入 Mali，并确认内核、设备树和启动包的长度及 CRC 均与发布镜像相符。恢复原版引导并核对 SHA-256 后，第二次正式版试用进入 AT4K。调试接口报告启动完成、屏幕开启、只读的 `/vendor` 设备号为 `179:10`，实际渲染器为 **ARM, Mali-G31, OpenGL ES 3.2**。首次冷启动黑屏的原因仍未确定。
+
 开启 USB 调试后可在电脑运行 `python3 port/gpu-selector/tests/check-device-slot.py --expect trial`，同时核对启动模式、只读挂载、便携存储列表和实际渲染器。验证默认 Mesa 时改用 `--expect mesa`。
 
 ## v0.3.1 AT4K 双驱动镜像
